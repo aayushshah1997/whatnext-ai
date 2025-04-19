@@ -279,6 +279,8 @@ export default function DrinksScreen() {
   const [showTweakSheet, setShowTweakSheet] = useState(false);
   const [tweakInput, setTweakInput] = useState('');
   const [previousFeedback, setPreviousFeedback] = useState<{ type: 'positive' | 'negative' | 'alternative' | 'tweak'; tweakRequest?: string } | undefined>();
+  const [showOtherInput, setShowOtherInput] = useState(false);
+  const [otherInput, setOtherInput] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
@@ -472,15 +474,23 @@ export default function DrinksScreen() {
     })();
   };
 
+  const handleOtherSubmit = (value: string) => {
+    setShowOtherInput(true);
+    setOtherInput('');
+  };
+
+  const handleOtherInputSend = () => {
+    if (!otherInput.trim()) return;
+    handleAnswer(otherInput.trim());
+    setShowOtherInput(false);
+    setOtherInput('');
+  };
+
   const handleTweakSend = () => {
     if (!tweakInput.trim()) return;
     handleTweakSubmit(tweakInput.trim());
     setShowTweakSheet(false);
     setTweakInput('');
-  };
-
-  const handleOtherSubmit = (value: string) => {
-    handleAnswer(value);
   };
 
   // Function to reset the quiz and start over
@@ -520,7 +530,7 @@ export default function DrinksScreen() {
       <SafeAreaView style={styles.container}>
         <ScrollView 
           style={styles.scrollView}
-          contentContainerStyle={showTweakSheet ? { paddingBottom: 100 } : undefined}
+          contentContainerStyle={showTweakSheet || showOtherInput ? { paddingBottom: 100 } : undefined}
           keyboardShouldPersistTaps="handled"
         >
           {!showQuiz && !showRecommendation && (
@@ -775,6 +785,16 @@ export default function DrinksScreen() {
           placeholder="Describe how you'd like to tweak your drink..."
           autoFocus
           visible={showTweakSheet}
+        />
+        
+        {/* InputBar for Other input */}
+        <InputBar
+          value={otherInput}
+          onChangeText={setOtherInput}
+          onSend={handleOtherInputSend}
+          placeholder="Enter your custom answer..."
+          autoFocus
+          visible={showOtherInput}
         />
       </SafeAreaView>
     </ScreenLayout>
