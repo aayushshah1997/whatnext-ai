@@ -18,7 +18,7 @@ const questions = [
   },
   {
     question: 'What type of alcohol do you prefer?',
-    options: ['Beer', 'Wine', 'Whiskey', 'Vodka', 'Tequila', 'Rum', 'Gin', 'Other']
+    options: ['Beer', 'Wine', 'Whiskey', 'Vodka', 'Tequila', 'Rum', 'Gin']
   },
   {
     question: 'How many drinks have you had today?',
