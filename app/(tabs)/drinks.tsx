@@ -586,7 +586,7 @@ export default function DrinksScreen() {
                 }).start();
               }}
             >
-              <ActivityIndicator size="large" color="#9C27B0" />
+              <ActivityIndicator size="large" color="#3498db" />
               <Text style={styles.loadingText}>Crafting the perfect drink for you...</Text>
             </Animated.View>
           )}
@@ -834,7 +834,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   startButton: {
-    backgroundColor: '#9C27B0',
+    backgroundColor: '#3498db',
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 25,
