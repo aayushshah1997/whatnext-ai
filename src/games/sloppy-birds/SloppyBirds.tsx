@@ -152,6 +152,10 @@ const SloppyBirds = () => {
   const [countdown, setCountdown] = useState(0);
   const [isCountingDown, setIsCountingDown] = useState(false);
   
+  // Start text animation state
+  const [showStartText, setShowStartText] = useState(false);
+  const startTextOpacity = useRef(new Animated.Value(0)).current;
+  
   // Bird selection state
   const [selectedBirdIndex, setSelectedBirdIndex] = useState(0);
   
@@ -223,6 +227,42 @@ const SloppyBirds = () => {
         
         // Short delay before starting game
         setTimeout(() => {
+          // Show and animate "Start" text
+          setShowStartText(true);
+          startTextOpacity.setValue(1);
+          
+          // Animate the opacity to create flashing/fading effect
+          Animated.sequence([
+            Animated.timing(startTextOpacity, {
+              toValue: 0.3,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(startTextOpacity, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(startTextOpacity, {
+              toValue: 0.3,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(startTextOpacity, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(startTextOpacity, {
+              toValue: 0,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]).start(() => {
+            // Hide start text when animation completes
+            setShowStartText(false);
+          });
+          
           // Reset game state
           setGameStarted(true);
           setIsCountingDown(false);
@@ -877,6 +917,20 @@ const SloppyBirds = () => {
               </TouchableOpacity>
             </View>
           )}
+          
+          {/* Start text */}
+          {showStartText && (
+            <Animated.Text
+              style={[
+                styles.startText,
+                {
+                  opacity: startTextOpacity,
+                },
+              ]}
+            >
+              Start!
+            </Animated.Text>
+          )}
         </View>
       </View>
     </TouchableWithoutFeedback>
@@ -1155,6 +1209,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textShadowColor: '#000',
     textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  startText: {
+    position: 'absolute',
+    top: height / 2 - 50,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 4, height: 4 },
     textShadowRadius: 0,
   },
 });
