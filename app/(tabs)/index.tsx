@@ -38,6 +38,22 @@ export default function HomeScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.3)).current;
 
+  // Preload the logo image when component mounts
+  useEffect(() => {
+    const preloadImages = async () => {
+      try {
+        await Asset.loadAsync(require('../../src/assets/logo.png'));
+        setLogoLoaded(true);
+      } catch (error) {
+        console.error('Failed to preload logo:', error);
+        // Set loaded anyway to avoid infinite loading state
+        setLogoLoaded(true);
+      }
+    };
+    
+    preloadImages();
+  }, []);
+
   // Start the pulsating animation when component mounts
   useEffect(() => {
     // Pulse animation for size
@@ -243,14 +259,29 @@ export default function HomeScreen() {
           <TouchableOpacity
             style={styles.centerTile}
             onPress={handleMosesPress}
+            activeOpacity={0.8}
           >
-            <View style={styles.centerTileContent}>
-              <Image 
-                source={require('../../assets/logo.png')} 
-                style={styles.centerLogo} 
-              />
-              <Text style={styles.askMosesText}>Ask Moses</Text>
-            </View>
+            <Animated.View
+              style={[
+                styles.centerTileContent,
+                {
+                  transform: [{ scale: pulseAnim }],
+                  shadowOpacity: glowOpacity,
+                },
+              ]}
+            >
+              {!logoLoaded ? (
+                <View style={styles.logoPlaceholder}>
+                  <ActivityIndicator size="large" color="#FFD700" />
+                </View>
+              ) : (
+                <Image
+                  source={require('../../src/assets/logo.png')}
+                  style={[styles.centerLogo, { marginTop: 10 }]}
+                  fadeDuration={0}
+                />
+              )}
+            </Animated.View>
           </TouchableOpacity>
         </View>
         
@@ -283,7 +314,7 @@ export default function HomeScreen() {
                     {!response && (
                       <View style={styles.mosesAvatarContainer}>
                         <View style={styles.mosesAvatar}>
-                          <Image source={require('../../assets/logo.png')} style={styles.avatarImage} />
+                          <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
                         </View>
                         <Text style={styles.mosesWelcomeText}>
                           Hey there! I'm Moses, your AI bartender. Ask me anything about drinks, bars, or nightlife!
@@ -307,7 +338,7 @@ export default function HomeScreen() {
                         {/* Moses response */}
                         <View style={styles.mosesMessageContainer}>
                           <View style={styles.mosesAvatar}>
-                            <Image source={require('../../assets/logo.png')} style={styles.avatarImage} />
+                            <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
                           </View>
                           <View style={styles.mosesMessage}>
                             <Text style={styles.responseText}>{response}</Text>
@@ -427,10 +458,18 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   centerLogo: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    marginBottom: 8,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 0,
+  },
+  logoPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   mosesText: {
     color: '#fff',
