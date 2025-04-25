@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Modal, Dimensions, TextInput, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform, Animated, TouchableWithoutFeedback, Keyboard, Image, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CircleHelp as HelpCircle, Wine, Beer, Utensils, Gamepad2, Send, X } from 'lucide-react-native';
+import { CircleHelp as HelpCircle, Wine, Beer, Utensils, Gamepad2, Send, X, Settings } from 'lucide-react-native';
 import ScreenLayout from '../../components/ScreenLayout';
 import { generateDrinkRecommendation } from '../../src/utils/mosesAI';
 import { MosesContext, DrinkRecommendation, FeedbackType } from '../../src/types/moses';
+import { Asset } from 'expo-asset';
+import { getOrCreateUser } from '../../src/lib/supabaseClient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CIRCLE_SIZE = Dimensions.get('window').width * 0.9;
 const OUTER_CIRCLE_SIZE = CIRCLE_SIZE;
@@ -27,8 +30,8 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState('');
   const [currentQuestion, setCurrentQuestion] = useState('');
-  
-  // Track which tile is being pressed
+  const [logoLoaded, setLogoLoaded] = useState(false);
+  const [userInitialized, setUserInitialized] = useState(false);
   const [pressedTile, setPressedTile] = useState<string | null>(null);
   
   // Create pulsating animation for the inner circle
@@ -72,6 +75,27 @@ export default function HomeScreen() {
         }),
       ])
     ).start();
+  }, []);
+
+  // Initialize user on first launch
+  useEffect(() => {
+    const initUser = async () => {
+      try {
+        // Check if user already exists in AsyncStorage
+        const userId = await AsyncStorage.getItem('user_id');
+        
+        if (!userId) {
+          // First launch - create user
+          await getOrCreateUser();
+        }
+        
+        setUserInitialized(true);
+      } catch (error) {
+        console.error('Error initializing user:', error);
+      }
+    };
+    
+    initUser();
   }, []);
 
   const handleTilePress = (route: string, tileName: string) => {
@@ -157,6 +181,14 @@ export default function HomeScreen() {
   return (
     <ScreenLayout hideBackButton={true}>
       <View style={styles.container}>
+        {/* Settings Button */}
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={() => router.push('/settings')}
+        >
+          <Settings size={24} color="#fff" />
+        </TouchableOpacity>
+        
         <View style={styles.circleContainer}>
           {/* Outer circle background */}
           <View style={[styles.circleBackground, { width: OUTER_CIRCLE_SIZE, height: OUTER_CIRCLE_SIZE }]} />
@@ -570,5 +602,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     borderWidth: 2,
     borderColor: '#e74c3c',
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: '#2C3E50',
+    borderRadius: 20,
+    padding: 10,
+    zIndex: 10,
   },
 });
