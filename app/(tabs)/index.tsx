@@ -6,7 +6,7 @@ import ScreenLayout from '../../components/ScreenLayout';
 import { generateDrinkRecommendation } from '../../src/utils/mosesAI';
 import { MosesContext, DrinkRecommendation, FeedbackType } from '../../src/types/moses';
 import { Asset } from 'expo-asset';
-import { getOrCreateUser } from '../../src/lib/supabaseClient';
+import { getOrCreateUser, logChat, getChatHistory } from '../../src/lib/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CIRCLE_SIZE = Dimensions.get('window').width * 0.9;
@@ -33,6 +33,10 @@ export default function HomeScreen() {
   const [logoLoaded, setLogoLoaded] = useState(false);
   const [userInitialized, setUserInitialized] = useState(false);
   const [pressedTile, setPressedTile] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
   
   // Create pulsating animation for the inner circle
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -97,17 +101,22 @@ export default function HomeScreen() {
   useEffect(() => {
     const initUser = async () => {
       try {
-        // Check if user already exists in AsyncStorage
-        const userId = await AsyncStorage.getItem('user_id');
+        setIsLoadingHistory(true);
+        // Get or create user
+        const user = await getOrCreateUser();
+        setUserId(user.id);
         
-        if (!userId) {
-          // First launch - create user
-          await getOrCreateUser();
+        // Load chat history
+        if (user.id) {
+          const history = await getChatHistory(user.id);
+          setChatHistory(history || []);
         }
         
         setUserInitialized(true);
       } catch (error) {
         console.error('Error initializing user:', error);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
     
@@ -135,7 +144,7 @@ export default function HomeScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || !userId) return;
     
     const currentQuestion = question;
     setIsLoading(true);
@@ -145,6 +154,19 @@ export default function HomeScreen() {
     
     try {
       console.log('Moses AI: sending question', currentQuestion);
+      
+      // Save user message to Supabase
+      await logChat(userId, 'user', currentQuestion);
+      
+      // Add user message to chat history
+      const userMessage = {
+        id: Date.now().toString(),
+        user_id: userId,
+        role: 'user',
+        message: currentQuestion,
+        created_at: new Date().toISOString()
+      };
+      setChatHistory(prev => [...prev, userMessage]);
       
       // Create a custom prompt for the Moses chatbot
       const mosesPrompt: Partial<MosesContext> = {
@@ -185,7 +207,25 @@ export default function HomeScreen() {
         }
       }
       
+      // Save AI response to Supabase
+      await logChat(userId, 'assistant', textResponse);
+      
+      // Add AI response to chat history
+      const aiMessage = {
+        id: (Date.now() + 1).toString(),
+        user_id: userId,
+        role: 'assistant',
+        message: textResponse,
+        created_at: new Date().toISOString()
+      };
+      setChatHistory(prev => [...prev, aiMessage]);
+      
       setResponse(textResponse);
+      
+      // Scroll to bottom after a short delay to ensure the new messages are rendered
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     } catch (error) {
       console.error('Error:', error);
       setResponse('Sorry, there was an error processing your question. How about we talk about drinks or party games instead?');
@@ -197,14 +237,6 @@ export default function HomeScreen() {
   return (
     <ScreenLayout hideBackButton={true}>
       <View style={styles.container}>
-        {/* Settings Button */}
-        <TouchableOpacity 
-          style={styles.settingsButton}
-          onPress={() => router.push('/settings')}
-        >
-          <Settings size={24} color="#fff" />
-        </TouchableOpacity>
-        
         <View style={styles.circleContainer}>
           {/* Outer circle background */}
           <View style={[styles.circleBackground, { width: OUTER_CIRCLE_SIZE, height: OUTER_CIRCLE_SIZE }]} />
@@ -285,6 +317,14 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
         
+        {/* Settings Button (at the X mark position) */}
+        <TouchableOpacity 
+          style={styles.centerBottomButton}
+          onPress={() => router.push('/settings')}
+        >
+          <Settings size={28} color="#fff" />
+        </TouchableOpacity>
+        
         {/* Moses AI Modal */}
         <Modal
           visible={showMosesModal}
@@ -300,7 +340,7 @@ export default function HomeScreen() {
               <View style={styles.modalOverlay}>
                 <View style={styles.modalContainer}>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Ask Moses AI</Text>
+                    <Text style={styles.modalTitle}>Chat with Moses AI</Text>
                     <TouchableOpacity
                       style={styles.closeButton}
                       onPress={() => setShowMosesModal(false)}
@@ -309,42 +349,55 @@ export default function HomeScreen() {
                     </TouchableOpacity>
                   </View>
                   
-                  <ScrollView style={styles.modalContent}>
-                    {/* Moses AI Avatar */}
-                    {!response && (
-                      <View style={styles.mosesAvatarContainer}>
-                        <View style={styles.mosesAvatar}>
-                          <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
-                        </View>
-                        <Text style={styles.mosesWelcomeText}>
-                          Hey there! I'm Moses, your AI bartender. Ask me anything about drinks, bars, or nightlife!
-                        </Text>
+                  <ScrollView 
+                    style={styles.modalContent}
+                    ref={scrollViewRef}
+                    onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+                  >
+                    {isLoadingHistory ? (
+                      <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color="#3498db" />
+                        <Text style={styles.loadingText}>Loading chat history...</Text>
                       </View>
-                    )}
-                    
-                    {/* Response */}
-                    {response && (
-                      <View style={styles.chatContainer}>
-                        {/* User's question */}
-                        <View style={styles.userMessageContainer}>
-                          <View style={styles.userMessage}>
-                            <Text style={styles.userMessageText}>{currentQuestion}</Text>
+                    ) : (
+                      <>
+                        {/* Welcome message if no history */}
+                        {chatHistory.length === 0 && (
+                          <View style={styles.mosesAvatarContainer}>
+                            <View style={styles.mosesAvatar}>
+                              <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
+                            </View>
+                            <Text style={styles.mosesWelcomeText}>
+                              Hey there! I'm Moses, your AI bartender. Ask me anything about drinks, bars, or nightlife!
+                            </Text>
                           </View>
-                          <View style={styles.userAvatar}>
-                            <Text style={styles.userAvatarText}>You</Text>
-                          </View>
-                        </View>
+                        )}
                         
-                        {/* Moses response */}
-                        <View style={styles.mosesMessageContainer}>
-                          <View style={styles.mosesAvatar}>
-                            <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
+                        {/* Chat history */}
+                        {chatHistory.map((message, index) => (
+                          <View key={message.id || index} style={styles.chatContainer}>
+                            {message.role === 'user' ? (
+                              <View style={styles.userMessageContainer}>
+                                <View style={styles.userMessage}>
+                                  <Text style={styles.userMessageText}>{message.message}</Text>
+                                </View>
+                                <View style={styles.userAvatar}>
+                                  <Text style={styles.userAvatarText}>You</Text>
+                                </View>
+                              </View>
+                            ) : (
+                              <View style={styles.mosesMessageContainer}>
+                                <View style={styles.mosesAvatar}>
+                                  <Image source={require('../../src/assets/logo.png')} style={styles.avatarImage} />
+                                </View>
+                                <View style={styles.mosesMessage}>
+                                  <Text style={styles.responseText}>{message.message}</Text>
+                                </View>
+                              </View>
+                            )}
                           </View>
-                          <View style={styles.mosesMessage}>
-                            <Text style={styles.responseText}>{response}</Text>
-                          </View>
-                        </View>
-                      </View>
+                        ))}
+                      </>
                     )}
                   </ScrollView>
                   
@@ -361,7 +414,7 @@ export default function HomeScreen() {
                       <TouchableOpacity
                         style={styles.sendButton}
                         onPress={handleSubmit}
-                        disabled={isLoading || !question.trim()}
+                        disabled={isLoading || !question.trim() || !userId}
                       >
                         {isLoading ? (
                           <ActivityIndicator color="#fff" />
@@ -642,13 +695,29 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e74c3c',
   },
-  settingsButton: {
+  centerBottomButton: {
     position: 'absolute',
-    top: 20,
-    right: 20,
+    bottom: 40,
+    left: Dimensions.get('window').width / 2 - 28,
     backgroundColor: '#2C3E50',
-    borderRadius: 20,
-    padding: 10,
+    borderRadius: 25,
+    padding: 12,
     zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 10,
+    fontSize: 16,
   },
 });

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { testSupabaseConnection, supabase } from '../src/lib/supabaseClient';
+import { testSupabaseConnection, supabase, supabaseUrl, supabaseAnonKey } from '../src/lib/supabaseClient';
 import ScreenLayout from '../components/ScreenLayout';
+import SupabaseHealthCheck from '../src/components/SupabaseHealthCheck';
 
 export default function SupabaseTestScreen() {
   const [testResults, setTestResults] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showAdvancedTests, setShowAdvancedTests] = useState(false);
 
   const addLog = (message: string) => {
     setTestResults(prev => [...prev, `${new Date().toISOString().substring(11, 19)} - ${message}`]);
@@ -19,11 +21,15 @@ export default function SupabaseTestScreen() {
       const result = await testSupabaseConnection();
       
       if (result.success) {
-        addLog('✅ Connection test successful');
+        addLog(`✅ Connection test successful: ${result.message}`);
       } else {
-        addLog(`❌ Connection test failed: ${JSON.stringify(result.error)}`);
+        addLog(`❌ Connection test failed: ${result.error}`);
+        addLog(`Error details: ${result.details || 'No details available'}`);
+        if (result.recommendation) {
+          addLog(`Recommendation: ${result.recommendation}`);
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       addLog(`❌ Test error: ${error.message || JSON.stringify(error)}`);
     } finally {
       setIsLoading(false);
@@ -51,7 +57,7 @@ export default function SupabaseTestScreen() {
           addLog('No users found in the table');
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       addLog(`❌ Users table error: ${error.message || JSON.stringify(error)}`);
     } finally {
       setIsLoading(false);
@@ -79,7 +85,7 @@ export default function SupabaseTestScreen() {
       } else {
         addLog(`✅ Test user created: ${JSON.stringify(data)}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       addLog(`❌ Create user error: ${error.message || JSON.stringify(error)}`);
     } finally {
       setIsLoading(false);
@@ -87,8 +93,10 @@ export default function SupabaseTestScreen() {
   };
 
   useEffect(() => {
-    // Run initial connection test when component mounts
-    runConnectionTest();
+    // Log Supabase configuration on mount
+    addLog(`Supabase URL: ${supabaseUrl}`);
+    addLog(`Supabase Key (first 10): ${supabaseAnonKey.substring(0, 10)}...`);
+    addLog(`Debug Mode: ${(supabase as any).debug ? 'ON' : 'OFF'}`);
   }, []);
 
   return (
@@ -96,38 +104,54 @@ export default function SupabaseTestScreen() {
       <View style={styles.container}>
         <Text style={styles.title}>Supabase Connection Test</Text>
         
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={[styles.button, isLoading && styles.disabledButton]} 
-            onPress={runConnectionTest}
-            disabled={isLoading}
-          >
-            <Text style={styles.buttonText}>Test Connection</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.button, isLoading && styles.disabledButton]} 
-            onPress={checkUsersTable}
-            disabled={isLoading}
-          >
-            <Text style={styles.buttonText}>Check Users Table</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.button, isLoading && styles.disabledButton]} 
-            onPress={createTestUser}
-            disabled={isLoading}
-          >
-            <Text style={styles.buttonText}>Create Test User</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Health Check Component */}
+        <SupabaseHealthCheck />
         
-        <ScrollView style={styles.logContainer}>
-          {testResults.map((log, index) => (
-            <Text key={index} style={styles.logText}>{log}</Text>
-          ))}
-          {isLoading && <Text style={styles.loadingText}>Loading...</Text>}
-        </ScrollView>
+        <TouchableOpacity 
+          style={styles.advancedToggle}
+          onPress={() => setShowAdvancedTests(!showAdvancedTests)}
+        >
+          <Text style={styles.advancedToggleText}>
+            {showAdvancedTests ? '▼ Hide Advanced Tests' : '▶ Show Advanced Tests'}
+          </Text>
+        </TouchableOpacity>
+        
+        {showAdvancedTests && (
+          <>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity 
+                style={[styles.button, isLoading && styles.disabledButton]} 
+                onPress={runConnectionTest}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>Test Connection</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.button, isLoading && styles.disabledButton]} 
+                onPress={checkUsersTable}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>Check Users Table</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.button, isLoading && styles.disabledButton]} 
+                onPress={createTestUser}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>Create Test User</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.logContainer}>
+              {testResults.map((log, index) => (
+                <Text key={index} style={styles.logText}>{log}</Text>
+              ))}
+              {isLoading && <Text style={styles.loadingText}>Loading...</Text>}
+            </ScrollView>
+          </>
+        )}
       </View>
     </ScreenLayout>
   );
@@ -137,13 +161,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    paddingTop: 80,
+    paddingTop: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 20,
+    textAlign: 'center',
+  },
+  advancedToggle: {
+    backgroundColor: '#333333',
+    padding: 10,
+    borderRadius: 5,
+    marginVertical: 10,
+  },
+  advancedToggleText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
     textAlign: 'center',
   },
   buttonContainer: {

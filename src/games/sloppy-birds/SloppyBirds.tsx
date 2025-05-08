@@ -12,11 +12,27 @@ import {
   Platform,
   SafeAreaView,
   ActivityIndicator,
+  Modal,
+  FlatList,
+  Alert,
 } from 'react-native';
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  X,
+} from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
+import {
+  getOrCreateUser,
+  saveGameScore,
+  getGameLeaderboard,
+  subscribeToLeaderboardChanges,
+} from '../../../src/lib/supabaseClient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../../../src/lib/supabaseClient';
 
 // Get screen dimensions
 const { width, height } = Dimensions.get('window');
@@ -41,7 +57,7 @@ const ICE_STACK_HEIGHTS = [120, 150, 180, 210, 240]; // Heights for 1-5 stacks
 
 // Bottle and glass approximate heights
 const BOTTLE_HEIGHT = 150; // Approximate height of bottle
-const GLASS_HEIGHT = 150;  // Approximate height of glass
+const GLASS_HEIGHT = 150; // Approximate height of glass
 
 // Fixed connection point to ensure bottles/glasses touch ice cubes perfectly
 const CONNECTION_OFFSET = -30; // Significantly increased overlap to eliminate all gaps
@@ -55,8 +71,8 @@ const BOTTOM_OVERLAP_PERCENTAGES = [0.95, 0.94, 0.93, 0.92, 0.91]; // For glasse
 const SIZE_FACTOR = 1.0;
 
 // Obstacle size variation constants
-const MIN_SIZE_FACTOR = 0.8;  // Minimum size multiplier (smaller for more variety)
-const MAX_SIZE_FACTOR = 1.4;  // Maximum size multiplier (larger for more variety)
+const MIN_SIZE_FACTOR = 0.8; // Minimum size multiplier (smaller for more variety)
+const MAX_SIZE_FACTOR = 1.4; // Maximum size multiplier (larger for more variety)
 
 // Collision adjustment constants
 const BOTTLE_COLLISION_WIDTH_FACTOR = 0.6; // Bottles are narrower than their container
@@ -75,7 +91,7 @@ interface Pipe {
   bottleSizeFactor: number;
   glassSizeFactor: number;
   gapSize: number;
-  topStackIndex: number;    // Index for top ice stack (1-5)
+  topStackIndex: number; // Index for top ice stack (1-5)
   bottomStackIndex: number; // Index for bottom ice stack (1-5)
 }
 
@@ -124,113 +140,281 @@ interface BirdType {
 const birds: BirdType[] = [
   {
     image: require('../../../sloppy_birds assets/birds/financebird.png'),
-    name: 'Finance bird'
+    name: 'Finance bird',
   },
   {
     image: require('../../../sloppy_birds assets/birds/rastabird.png'),
-    name: 'Rasta bird'
+    name: 'Rasta bird',
   },
   {
     image: require('../../../sloppy_birds assets/birds/artsybird.png'),
-    name: 'Artsy bird'
-  }
+    name: 'Artsy bird',
+  },
 ];
+
+// Define interfaces for type safety
+interface LeaderboardEntry {
+  username: string;
+  top_score: number;
+}
 
 const SloppyBirds = () => {
   const router = useRouter();
-  
+
+  // Component state
+  const [gameState, setGameState] = useState('start'); // 'start', 'playing', 'gameOver'
+  const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(0);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+  const [selectedBirdIndex, setSelectedBirdIndex] = useState(0);
+  const [showBirdSelection, setShowBirdSelection] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [jumpSound, setJumpSound] = useState(null);
+  const [scoreSound, setScoreSound] = useState(null);
+  const [crashSound, setCrashSound] = useState(null);
+
   // Loading state
   const [assetsLoaded, setAssetsLoaded] = useState(false);
-  
+
   // Game state
   const [gameStarted, setGameStarted] = useState(false);
   const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
-  
+
   // Countdown state
   const [countdown, setCountdown] = useState(0);
   const [isCountingDown, setIsCountingDown] = useState(false);
-  
+
   // Start text animation state
   const [showStartText, setShowStartText] = useState(false);
   const startTextOpacity = useRef(new Animated.Value(0)).current;
-  
+
   // Bird selection state
-  const [selectedBirdIndex, setSelectedBirdIndex] = useState(0);
-  
+
   // Refs to track game state
-  const gameStateRef = useRef({ gameStarted: false, gameOver: false, score: 0, highScore: 0 });
-  
+  const gameStateRef = useRef({
+    gameStarted: false,
+    gameOver: false,
+    score: 0,
+    highScore: 0,
+  });
+
   // Bird state
   const birdPositionRef = useRef(new Animated.Value(height / 2 - BIRD_HEIGHT / 2));
   const birdRotation = useRef(new Animated.Value(0)).current;
   const birdVelocityRef = useRef(0);
-  
+
   // Pipes state
   const [pipes, setPipes] = useState<Pipe[]>([]);
   const pipesRef = useRef<Pipe[]>([]);
   const pipesPassedRef = useRef(new Set<number>());
-  
+
   // Track last used image indexes to avoid repetition
   const lastBottleIndexRef = useRef(-1);
   const lastGlassIndexRef = useRef(-1);
-  
+
   // Animation refs
   const animationFrameId = useRef<number | null>(null);
   const pipeTimerId = useRef<NodeJS.Timeout | null>(null);
   const lastUpdateTime = useRef(Date.now());
-  
+
+  // Supabase integration
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const leaderboardSubscription = useRef<any>(null);
+
+  // Load high score from AsyncStorage on component mount
+  useEffect(() => {
+    const loadHighScore = async () => {
+      try {
+        console.log('Loading high score from AsyncStorage...');
+        const storedHighScore = await AsyncStorage.getItem('Sloppy Birds_highscore');
+        if (storedHighScore) {
+          const parsedHighScore = parseInt(storedHighScore, 10);
+          console.log('Found high score in AsyncStorage:', parsedHighScore);
+          
+          // Update state and ref
+          setHighScore(parsedHighScore);
+          gameStateRef.current.highScore = parsedHighScore;
+          
+          // Log confirmation
+          console.log('High score loaded and set to:', parsedHighScore);
+        } else {
+          console.log('No high score found in AsyncStorage, using default of 0');
+          setHighScore(0);
+          gameStateRef.current.highScore = 0;
+        }
+      } catch (error) {
+        console.error('Error loading high score from AsyncStorage:', error);
+      }
+    };
+
+    // Load high score immediately on mount
+    loadHighScore();
+    
+    // Set up a timer to check high score again after a short delay
+    // This helps ensure the high score is loaded even if there are timing issues
+    const timer = setTimeout(() => {
+      loadHighScore();
+    }, 1000);
+    
+    // Clean up timer
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Load user ID and leaderboard on component mount
+  useEffect(() => {
+    setupSupabase();
+    
+    // Set up a subscription to leaderboard updates
+    const leaderboardSubscription = supabase
+      .channel('public:game_sessions')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'game_sessions',
+        filter: 'game_name=eq.Sloppy Birds'
+      }, () => {
+        console.log('Received leaderboard update notification');
+        fetchLeaderboard();
+      })
+      .subscribe();
+    
+    return () => {
+      leaderboardSubscription.unsubscribe();
+    };
+  }, []);
+
+  // Initialize Supabase and load user data
+  const setupSupabase = async () => {
+    try {
+      console.log('Setting up Supabase and loading user data...');
+      
+      // Get or create user
+      const user = await getOrCreateUser();
+      setUserId(user.id);
+      console.log('User loaded:', user);
+      
+      // Fetch leaderboard
+      await fetchLeaderboard();
+    } catch (error) {
+      console.error('Error setting up Supabase:', error);
+      Alert.alert(
+        'Connection Error',
+        'Could not connect to the server. Some features may be limited.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  // Fetch leaderboard data
+  const fetchLeaderboard = async () => {
+    try {
+      setLeaderboardLoading(true);
+      console.log('Fetching leaderboard data...');
+      
+      // Get leaderboard from Supabase
+      const leaderboardData = await getGameLeaderboard('Sloppy Birds');
+      console.log('Leaderboard data received:', leaderboardData);
+      
+      let displayLeaderboard = [...(leaderboardData || [])];
+      
+      // If the current user's high score is not in the leaderboard and it's higher than 0,
+      // add it to the leaderboard
+      if (highScore > 0) {
+        const username = await AsyncStorage.getItem('username') || 'You';
+        const userInLeaderboard = displayLeaderboard.some(
+          entry => entry.username === username
+        );
+        
+        if (!userInLeaderboard) {
+          displayLeaderboard.push({
+            username,
+            top_score: highScore
+          });
+        }
+      }
+      
+      // If the leaderboard is still empty, add a default entry
+      if (displayLeaderboard.length === 0) {
+        const username = await AsyncStorage.getItem('username') || 'You';
+        displayLeaderboard = [{ username, top_score: highScore > 0 ? highScore : 0 }];
+      }
+      
+      // Sort leaderboard by score
+      displayLeaderboard.sort((a, b) => b.top_score - a.top_score);
+      
+      // Update state
+      setLeaderboard(displayLeaderboard);
+      setLeaderboardLoading(false);
+      console.log('Leaderboard updated:', displayLeaderboard);
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+      
+      // Fallback to showing just the user's high score
+      try {
+        const username = await AsyncStorage.getItem('username') || 'You';
+        setLeaderboard([{ username, top_score: highScore > 0 ? highScore : 0 }]);
+      } catch (err) {
+        console.error('Error creating fallback leaderboard:', err);
+        setLeaderboard([{ username: 'You', top_score: highScore > 0 ? highScore : 0 }]);
+      }
+      
+      setLeaderboardLoading(false);
+    }
+  };
+
   // Keep refs in sync with state
   useEffect(() => {
     gameStateRef.current.gameStarted = gameStarted;
     gameStateRef.current.gameOver = gameOver;
   }, [gameStarted, gameOver]);
-  
+
   // Get a random bottle index (avoiding consecutive repeats)
   const getRandomBottleIndex = (): number => {
     let newIndex;
     do {
       newIndex = Math.floor(Math.random() * 4); // 4 bottle images
     } while (newIndex === lastBottleIndexRef.current);
-    
+
     lastBottleIndexRef.current = newIndex;
     return newIndex;
   };
-  
+
   // Get a random glass index (avoiding consecutive repeats)
   const getRandomGlassIndex = (): number => {
     let newIndex;
     do {
       newIndex = Math.floor(Math.random() * 6); // 6 glass images
     } while (newIndex === lastGlassIndexRef.current);
-    
+
     lastGlassIndexRef.current = newIndex;
     return newIndex;
   };
-  
+
   // Initialize game
   const startGame = () => {
     // Start countdown
     setIsCountingDown(true);
     setCountdown(3);
-    
+
     // Start countdown timer
     let count = 3;
     const countdownTimer = setInterval(() => {
       count--;
       setCountdown(count);
-      
+
       if (count === 0) {
         // Clear countdown timer
         clearInterval(countdownTimer);
-        
+
         // Short delay before starting game
         setTimeout(() => {
           // Show and animate "Start" text
           setShowStartText(true);
           startTextOpacity.setValue(1);
-          
+
           // Animate the opacity to create flashing/fading effect
           Animated.sequence([
             Animated.timing(startTextOpacity, {
@@ -262,77 +446,84 @@ const SloppyBirds = () => {
             // Hide start text when animation completes
             setShowStartText(false);
           });
-          
+
           // Reset game state
           setGameStarted(true);
           setIsCountingDown(false);
           setGameOver(false);
           setScore(0);
-          gameStateRef.current = { gameStarted: true, gameOver: false, score: 0, highScore };
-          
+          gameStateRef.current = {
+            gameStarted: true,
+            gameOver: false,
+            score: 0,
+            highScore,
+          };
+
           console.log('Starting game...');
-          
+
           // Reset bird position and velocity
           birdPositionRef.current.setValue(height / 2 - BIRD_HEIGHT / 2);
           birdVelocityRef.current = 0;
-          
+
           // Reset pipes
           setPipes([]);
           pipesRef.current = [];
-          
+
           // Start game loop
           lastUpdateTime.current = Date.now();
           animationFrameId.current = requestAnimationFrame(gameLoop);
-          
+
           // Start pipe generator
           pipeTimerId.current = setInterval(addPipe, PIPE_INTERVAL);
         }, 1000); // 1 second delay after countdown reaches 0
       }
     }, 1000);
   };
-  
+
   // Main game loop
   const gameLoop = () => {
     // Check if game is over using ref to avoid closure issues
     if (gameStateRef.current.gameOver) {
       return;
     }
-    
+
     updateGame();
-    
+
     // Continue the loop
     animationFrameId.current = requestAnimationFrame(gameLoop);
   };
-  
+
   // Generate a new pipe
   const addPipe = () => {
     // Ensure we don't add pipes if the game is over
     if (gameStateRef.current.gameOver) return;
-    
+
     // Generate a random gap size between min and max
     const gapSize = MIN_PIPE_GAP + Math.random() * (MAX_PIPE_GAP - MIN_PIPE_GAP);
-    
+
     // Calculate playable height (excluding top boundary)
     const playableHeight = BOTTOM_BOUNDARY - TOP_BOUNDARY;
-    
+
     // Generate random stack sizes
     const topStackIndex = Math.floor(Math.random() * 5); // 0-4 (1-5 ice cubes)
     const bottomStackIndex = Math.floor(Math.random() * 5); // 0-4 (1-5 ice cubes)
-    
+
     // Calculate the top pipe height
-    const topHeight = TOP_BOUNDARY + Math.min(
-      (playableHeight - gapSize) / 2,
-      ICE_STACK_HEIGHTS[topStackIndex] + BOTTLE_HEIGHT
-    );
-    
+    const topHeight =
+      TOP_BOUNDARY +
+      Math.min(
+        (playableHeight - gapSize) / 2,
+        ICE_STACK_HEIGHTS[topStackIndex] + BOTTLE_HEIGHT
+      );
+
     // Random bottle and glass indices
     let bottleIndex = Math.floor(Math.random() * bottleImages.length);
     let glassIndex = Math.floor(Math.random() * glassImages.length);
-    
+
     // Avoid repeating the same bottle type consecutively
     if (pipesRef.current.length > 0) {
       const lastPipe = pipesRef.current[pipesRef.current.length - 1];
-      
+
       // Ensure we don't get the same obstacle twice in a row
       while (bottleIndex === lastPipe.bottleIndex) {
         bottleIndex = Math.floor(Math.random() * bottleImages.length);
@@ -341,7 +532,7 @@ const SloppyBirds = () => {
         glassIndex = Math.floor(Math.random() * glassImages.length);
       }
     }
-    
+
     const newPipe: Pipe = {
       id: Date.now(),
       x: width,
@@ -355,30 +546,30 @@ const SloppyBirds = () => {
       bottleSizeFactor: SIZE_FACTOR,
       glassSizeFactor: SIZE_FACTOR,
     };
-    
+
     // Add the new pipe to the pipes array
-    setPipes(currentPipes => [...currentPipes, newPipe]);
+    setPipes((currentPipes) => [...currentPipes, newPipe]);
     pipesRef.current = [...pipesRef.current, newPipe];
   };
-  
+
   // Load all game assets
   const loadAssets = async () => {
     try {
       // Use Promise.all to load all assets in parallel
       await Promise.all([
         // Preload all bird images
-        ...birds.map(bird => Asset.loadAsync(bird.image)),
+        ...birds.map((bird) => Asset.loadAsync(bird.image)),
         // Preload all bottle images
-        ...bottleImages.map(image => Asset.loadAsync(image)),
+        ...bottleImages.map((image) => Asset.loadAsync(image)),
         // Preload all glass images
-        ...glassImages.map(image => Asset.loadAsync(image)),
+        ...glassImages.map((image) => Asset.loadAsync(image)),
         // Preload all ice stack images
-        ...topIceStackImages.map(image => Asset.loadAsync(image)),
-        ...bottomIceStackImages.map(image => Asset.loadAsync(image)),
+        ...topIceStackImages.map((image) => Asset.loadAsync(image)),
+        ...bottomIceStackImages.map((image) => Asset.loadAsync(image)),
         // Preload background image
         Asset.loadAsync(require('../../../assets/images/nyc-bg.png')),
       ]);
-      
+
       console.log('All game assets loaded successfully');
       setAssetsLoaded(true);
     } catch (error) {
@@ -387,65 +578,65 @@ const SloppyBirds = () => {
       setAssetsLoaded(true);
     }
   };
-  
+
   // Calculate collision based on fixed size
   const calculateCollision = (size: number, factor: number) => size * factor;
-  
+
   // Check for collision with obstacles
   const checkCollision = () => {
     if (gameStateRef.current.gameOver) return false;
-    
+
     // Bird dimensions (smaller collision box for better gameplay)
-    const birdSize = 25; 
-    const birdLeft = width / 3 + 5; 
+    const birdSize = 25;
+    const birdLeft = width / 3 + 5;
     const birdRight = birdLeft + birdSize;
-    const birdTop = (birdPositionRef.current as any)._value + 5; 
+    const birdTop = (birdPositionRef.current as any)._value + 5;
     const birdBottom = birdTop + birdSize;
-    
+
     // Check if bird hits the bottom of the screen only (not the top)
     if (birdBottom >= height) {
       return true;
     }
-    
+
     // Check collision with pipes (bottles and glasses)
     for (const pipe of pipesRef.current) {
       const pipeX = pipe.x;
       const pipeRight = pipeX + PIPE_WIDTH;
-      
+
       // Only check pipes that are in the vicinity of the bird
       if (pipeRight < birdLeft || pipeX > birdRight) {
         continue;
       }
-      
+
       // Get the actual dimensions of the bottle and glass for this pipe
       // Using narrower collision boxes (60% of pipe width) for more forgiving gameplay
-      const bottleWidth = PIPE_WIDTH * 0.6; 
-      const glassWidth = PIPE_WIDTH * 0.6; 
-      
+      const bottleWidth = PIPE_WIDTH * 0.6;
+      const glassWidth = PIPE_WIDTH * 0.6;
+
       // Calculate the positions of the bottle and glass for collision
       const bottleX = pipeX + (PIPE_WIDTH - bottleWidth) / 2;
-      
+
       // For top obstacle: calculate both ice cube and bottle collision
       const topIceHeight = ICE_STACK_HEIGHTS[pipe.topStackIndex];
       const bottleY = 50 + Math.max(0, topIceHeight - 80); // Account for top position at 50
       const bottleHeight = BOTTLE_HEIGHT * 0.8;
-      
+
       // For bottom obstacle: calculate both ice cube and glass collision
       const bottomIceHeight = ICE_STACK_HEIGHTS[pipe.bottomStackIndex];
       const bottomObstacleTop = pipe.topHeight + pipe.gapSize;
       const glassY = bottomObstacleTop + Math.max(0, bottomIceHeight - 80);
       const glassHeight = GLASS_HEIGHT * 0.8;
-      
+
       // Check for collision with top ice cubes - using smaller collision area
       if (
         birdRight > pipeX + 10 &&
         birdLeft < pipeX + PIPE_WIDTH - 10 &&
-        birdTop < 50 + topIceHeight - 5 && 
+        birdTop < 50 + topIceHeight - 5 &&
         birdTop > 50 + 5
       ) {
         return true;
       }
-      
+
       // Check for collision with bottle - using smaller collision area
       if (
         birdRight > bottleX + 5 &&
@@ -455,7 +646,7 @@ const SloppyBirds = () => {
       ) {
         return true;
       }
-      
+
       // Check for collision with bottom ice cubes - using smaller collision area
       if (
         birdRight > pipeX + 10 &&
@@ -465,7 +656,7 @@ const SloppyBirds = () => {
       ) {
         return true;
       }
-      
+
       // Check for collision with glass - using smaller collision area
       if (
         birdRight > bottleX + 5 &&
@@ -476,50 +667,53 @@ const SloppyBirds = () => {
         return true;
       }
     }
-    
+
     return false;
   };
-  
+
   // Update game state
   const updateGame = () => {
     const now = Date.now();
     const deltaTime = (now - lastUpdateTime.current) / 16.67; // Normalize to ~60fps
     lastUpdateTime.current = now;
-    
+
     // Update bird velocity and position
     birdVelocityRef.current += GRAVITY * deltaTime;
-    
+
     // Get current position
     const currentBirdY = (birdPositionRef.current as any)._value;
     const newBirdY = currentBirdY + birdVelocityRef.current * deltaTime;
-    
+
     // Check bottom of screen collision
     if (newBirdY >= height - BIRD_HEIGHT) {
       birdPositionRef.current.setValue(height - BIRD_HEIGHT);
       endGame();
       return;
     }
-    
+
     // Update bird position
     birdPositionRef.current.setValue(newBirdY);
-    
+
     // Update bird rotation based on velocity
-    const targetRotation = Math.min(90, Math.max(-30, birdVelocityRef.current * 3));
+    const targetRotation = Math.min(
+      90,
+      Math.max(-30, birdVelocityRef.current * 3)
+    );
     birdRotation.setValue(targetRotation);
-    
+
     // Bird's horizontal position (fixed)
     const birdX = width / 3 - BIRD_WIDTH / 2;
     const birdY = newBirdY;
-    
+
     // Update pipes and check collisions
     const updatedPipes = pipesRef.current
-      .map(pipe => {
+      .map((pipe) => {
         // Move pipe to the left
         const updatedPipe = {
           ...pipe,
-          x: pipe.x - PIPE_SPEED * deltaTime
+          x: pipe.x - PIPE_SPEED * deltaTime,
         };
-        
+
         // Check for collision if game is still active
         if (!gameStateRef.current.gameOver) {
           // Check collision using AABB method
@@ -528,17 +722,17 @@ const SloppyBirds = () => {
             endGame();
           }
         }
-        
+
         // Check if bird has passed this pipe
         if (
-          !updatedPipe.passed && 
-          updatedPipe.x + PIPE_WIDTH < birdX && 
+          !updatedPipe.passed &&
+          updatedPipe.x + PIPE_WIDTH < birdX &&
           !pipesPassedRef.current.has(updatedPipe.id)
         ) {
           console.log('Pipe passed!');
           pipesPassedRef.current.add(updatedPipe.id);
           updatedPipe.passed = true;
-          setScore(prevScore => {
+          setScore((prevScore) => {
             const newScore = prevScore + 1;
             if (newScore > highScore) {
               setHighScore(newScore);
@@ -546,15 +740,15 @@ const SloppyBirds = () => {
             return newScore;
           });
         }
-        
+
         return updatedPipe;
       })
-      .filter(pipe => pipe.x > -PIPE_WIDTH); // Remove pipes that are off screen
-    
+      .filter((pipe) => pipe.x > -PIPE_WIDTH); // Remove pipes that are off screen
+
     pipesRef.current = updatedPipes;
     setPipes(updatedPipes);
   };
-  
+
   // Handle jump
   const handleTap = () => {
     // Only handle tap if game is started and not over
@@ -564,112 +758,182 @@ const SloppyBirds = () => {
       birdVelocityRef.current = JUMP_FORCE;
     }
   };
-  
+
   // Reset to start screen
   const resetToStartScreen = () => {
     console.log('Resetting to start screen...');
     setGameStarted(false);
     setGameOver(false);
     setScore(0);
-    
+
     // Reset bird position and velocity
     birdPositionRef.current.setValue(height / 2 - BIRD_HEIGHT / 2);
     birdRotation.setValue(0);
     birdVelocityRef.current = 0;
-    
+
     // Reset pipes
     setPipes([]);
     pipesRef.current = [];
     pipesPassedRef.current = new Set();
-    
+
     // Clear any running animations/timers
     if (animationFrameId.current) {
       cancelAnimationFrame(animationFrameId.current);
       animationFrameId.current = null;
     }
-    
+
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
     }
   };
-  
+
   // End game
   const endGame = () => {
     console.log('Game over! Score:', score);
     setGameOver(true);
-    
+
     // Stop animations
     if (animationFrameId.current) {
       cancelAnimationFrame(animationFrameId.current);
       animationFrameId.current = null;
     }
-    
+
     // Stop pipe generator
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
     }
+
+    // Update high score immediately if needed
+    if (score > highScore) {
+      console.log('New high score:', score, '(previous:', highScore, ')');
+      setHighScore(score);
+      gameStateRef.current.highScore = score;
+      
+      // Save high score to AsyncStorage immediately
+      try {
+        AsyncStorage.setItem('Sloppy Birds_highscore', score.toString());
+        console.log('High score saved to AsyncStorage:', score);
+      } catch (err) {
+        console.error('Error saving high score to AsyncStorage:', err);
+      }
+    }
+
+    // Save score to Supabase
+    if (userId) {
+      // Ensure score is a number
+      const numericScore = Number(score);
+      console.log('Saving score to Supabase:', numericScore, 'User ID:', userId);
+      
+      // Direct Supabase insert for debugging
+      try {
+        console.log('Attempting direct Supabase insert...');
+        Promise.resolve(supabase
+          .from('game_sessions')
+          .insert({
+            user_id: userId,
+            game_name: 'Sloppy Birds',
+            score: numericScore,
+            game_specific_data: {
+              birdType: birds[selectedBirdIndex].name,
+              timestamp: new Date().toISOString(),
+              device: Platform.OS
+            },
+            created_at: new Date().toISOString()
+          }))
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Direct Supabase insert error:', error);
+              Alert.alert(
+                'Score Save Error',
+                `Failed to save score: ${error.message}`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              console.log('Direct Supabase insert success:', data);
+              // Fetch updated leaderboard
+              fetchLeaderboard();
+            }
+          })
+          .catch((err: Error) => {
+            console.error('Exception during direct Supabase insert:', err);
+          });
+      } catch (directError) {
+        console.error('Exception wrapping direct Supabase insert:', directError);
+      }
+      
+      // Also try the helper function approach
+      console.log('Also trying helper function approach...');
+      saveGameScore(userId, 'Sloppy Birds', numericScore, {
+        birdType: birds[selectedBirdIndex].name,
+        timestamp: new Date().toISOString(),
+        device: Platform.OS
+      })
+      .then((data: any) => {
+        console.log('Score saved successfully via helper:', data);
+        // Fetch updated leaderboard
+        fetchLeaderboard();
+      })
+      .catch((error: any) => {
+        console.error('Error saving score via helper:', error);
+        // Still update the leaderboard with local data
+        fetchLeaderboard();
+      });
+    } else {
+      console.error('Cannot save score: No user ID available');
+      Alert.alert(
+        'Score Not Saved',
+        'Unable to save your score because user ID is not available. Please restart the app.',
+        [{ text: 'OK' }]
+      );
+    }
   };
-  
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
-      if (pipeTimerId.current) {
-        clearInterval(pipeTimerId.current);
-      }
-    };
-  }, []);
-  
+
   // Handle back button press
   const handleBackPress = () => {
     if (animationFrameId.current) {
       cancelAnimationFrame(animationFrameId.current);
       animationFrameId.current = null;
     }
-    
+
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
     }
-    
+
     // Navigate to the games screen directly instead of using router.back()
     router.push('/games');
   };
-  
+
   // Bird rotation interpolation
   const birdRotateInterpolation = birdRotation.interpolate({
     inputRange: [-30, 90],
     outputRange: ['-30deg', '90deg'],
   });
-  
+
   // Handle bird selection
   const selectPreviousBird = () => {
-    setSelectedBirdIndex((prevIndex) => 
+    setSelectedBirdIndex((prevIndex) =>
       prevIndex === 0 ? birds.length - 1 : prevIndex - 1
     );
   };
-  
+
   const selectNextBird = () => {
-    setSelectedBirdIndex((prevIndex) => 
-      (prevIndex + 1) % birds.length
-    );
+    setSelectedBirdIndex((prevIndex) => (prevIndex + 1) % birds.length);
   };
-  
+
   // Preload assets on component mount
   useEffect(() => {
     loadAssets();
   }, []);
-  
+
   // Create combined images for each obstacle type instead of trying to position them separately
   const renderObstacles = () => {
     return (
       <>
         {/* Pipes (now bottles and glasses with ice stacks) */}
-        {pipes.map(pipe => (
+        {pipes.map((pipe) => (
           <React.Fragment key={pipe.id}>
             {/* Top obstacle (ice cube with bottle below) */}
             <View
@@ -696,7 +960,7 @@ const SloppyBirds = () => {
                 }}
                 fadeDuration={0}
               />
-              
+
               {/* Then render bottle on top to create overlap effect */}
               <Image
                 source={bottleImages[pipe.bottleIndex]}
@@ -711,7 +975,7 @@ const SloppyBirds = () => {
                 fadeDuration={0}
               />
             </View>
-            
+
             {/* Bottom obstacle (ice cube with glass above) */}
             <View
               style={[
@@ -737,7 +1001,7 @@ const SloppyBirds = () => {
                 }}
                 fadeDuration={0}
               />
-              
+
               {/* Then render glass on top to create overlap effect */}
               <Image
                 source={glassImages[pipe.glassIndex]}
@@ -757,7 +1021,7 @@ const SloppyBirds = () => {
       </>
     );
   };
-  
+
   // Show loading screen if assets aren't loaded yet
   if (!assetsLoaded) {
     return (
@@ -767,26 +1031,26 @@ const SloppyBirds = () => {
       </View>
     );
   }
-  
+
   return (
     <TouchableWithoutFeedback onPress={handleTap}>
       <View style={styles.container}>
         <StatusBar hidden={false} />
-        
+
         {/* NYC Skyline background */}
-        <Image 
-          source={require('../../../assets/images/nyc-bg.png')} 
+        <Image
+          source={require('../../../assets/images/nyc-bg.png')}
           style={styles.backgroundImage}
           resizeMode="cover"
         />
-        
+
         {/* Game content with proper z-index layering */}
         <View style={styles.gameContent}>
           {(gameStarted || isCountingDown) && (
             <>
               {/* Render obstacles */}
               {renderObstacles()}
-              
+
               {/* Bird */}
               <Animated.View
                 style={[
@@ -794,9 +1058,9 @@ const SloppyBirds = () => {
                   {
                     transform: [
                       { translateY: birdPositionRef.current },
-                      { rotate: birdRotateInterpolation }
-                    ]
-                  }
+                      { rotate: birdRotateInterpolation },
+                    ],
+                  },
                 ]}
               >
                 <Image
@@ -808,7 +1072,7 @@ const SloppyBirds = () => {
               </Animated.View>
             </>
           )}
-          
+
           {/* Score or Countdown */}
           {(gameStarted || isCountingDown) && !gameOver && (
             <Text style={styles.scoreText}>
@@ -816,93 +1080,129 @@ const SloppyBirds = () => {
             </Text>
           )}
         </View>
-        
+
         {/* UI elements that should appear on top */}
         <View style={styles.uiLayer}>
           {/* Header with Back button only */}
           <View style={styles.header}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backButton}
               onPress={handleBackPress}
             >
               <ArrowLeft size={24} color="white" />
             </TouchableOpacity>
+
+            {/* Offline indicator */}
+            {isOfflineMode && (
+              <View style={styles.offlineIndicator}>
+                <Text style={styles.offlineText}>OFFLINE MODE</Text>
+              </View>
+            )}
           </View>
-          
+
           {/* Start screen */}
           {!gameStarted && !isCountingDown && !gameOver && (
             <View style={styles.startScreenContainer}>
               <Text style={styles.gameTitle}>Sloppy Birds</Text>
+
+              {/* Offline warning if needed */}
+              {isOfflineMode && (
+                <Text style={styles.offlineWarning}>
+                  You're in offline mode. Scores will be saved locally.
+                </Text>
+              )}
+
               <Text style={styles.chooseVibeText}>Choose a vibe...</Text>
-              
+
               {/* Bird selector */}
               <View style={styles.birdSelectorContainer}>
-                <TouchableOpacity 
-                  style={styles.arrowButton} 
+                <TouchableOpacity
+                  style={styles.arrowButton}
                   onPress={selectPreviousBird}
                 >
                   <ChevronLeft size={32} color="white" />
                 </TouchableOpacity>
-                
+
                 <View style={styles.birdPreviewContainer}>
                   <Image
                     source={birds[selectedBirdIndex].image}
                     style={styles.birdPreviewImage}
                     resizeMode="contain"
                   />
-                  <Text style={styles.birdName}>{birds[selectedBirdIndex].name}</Text>
+                  <Text style={styles.birdName}>
+                    {birds[selectedBirdIndex].name}
+                  </Text>
                 </View>
-                
-                <TouchableOpacity 
-                  style={styles.arrowButton} 
+
+                <TouchableOpacity
+                  style={styles.arrowButton}
                   onPress={selectNextBird}
                 >
                   <ChevronRight size={32} color="white" />
                 </TouchableOpacity>
               </View>
-              
+
               {/* Bird selection dots */}
               <View style={styles.dotsContainer}>
                 {birds.map((_, index) => (
-                  <View 
-                    key={index} 
+                  <View
+                    key={index}
                     style={[
-                      styles.dot, 
-                      index === selectedBirdIndex && styles.activeDot
-                    ]} 
+                      styles.dot,
+                      index === selectedBirdIndex && styles.activeDot,
+                    ]}
                   />
                 ))}
               </View>
-              
+
               {/* Start button */}
-              <TouchableOpacity 
-                style={styles.startButton} 
+              <TouchableOpacity
+                style={styles.startButton}
                 onPress={startGame}
               >
                 <Text style={styles.startButtonText}>Let's Fly!</Text>
               </TouchableOpacity>
-              
+
               {/* Leaderboard section */}
               <View style={styles.leaderboardContainer}>
                 <View style={styles.leaderboardColumn}>
                   <Text style={styles.leaderboardTitle}>High-score</Text>
                   <Text style={styles.highScoreText}>{highScore}</Text>
                 </View>
-                
+
                 <View style={styles.leaderboardDivider} />
-                
+
                 <View style={styles.leaderboardColumn}>
-                  <Text style={[styles.leaderboardTitle, { fontSize: 16 }]}>Leaderboard</Text>
-                  <View style={styles.leaderboardEntries}>
-                    <Text style={styles.leaderboardEntry}>—</Text>
-                    <Text style={styles.leaderboardEntry}>—</Text>
-                    <Text style={styles.leaderboardEntry}>—</Text>
-                  </View>
+                  <TouchableOpacity onPress={() => setShowLeaderboard(true)}>
+                    <Text style={[styles.leaderboardTitle, { fontSize: 16 }]}>
+                      Leaderboard
+                    </Text>
+                  </TouchableOpacity>
+
+                  {leaderboardLoading ? (
+                    <ActivityIndicator size="small" color="#FFD700" />
+                  ) : (
+                    <View style={styles.leaderboardEntries}>
+                      {leaderboard && leaderboard.length > 0 ? (
+                        leaderboard.slice(0, 3).map((entry, index) => (
+                          <Text key={index} style={styles.leaderboardEntry}>
+                            {index + 1}. {entry.username || 'Anonymous'} -{' '}
+                            {entry.top_score || 0}
+                          </Text>
+                        ))
+                      ) : (
+                        // Default entry when leaderboard is empty
+                        <Text style={styles.leaderboardEntry}>
+                          1. Aayush - {highScore > 0 ? highScore : 0}
+                        </Text>
+                      )}
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
           )}
-          
+
           {/* Game over message */}
           {gameOver && (
             <View style={styles.messageContainer}>
@@ -917,7 +1217,7 @@ const SloppyBirds = () => {
               </TouchableOpacity>
             </View>
           )}
-          
+
           {/* Start text */}
           {showStartText && (
             <Animated.Text
@@ -932,6 +1232,59 @@ const SloppyBirds = () => {
             </Animated.Text>
           )}
         </View>
+
+        {/* Full Leaderboard Modal */}
+        <Modal
+          visible={showLeaderboard}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowLeaderboard(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Sloppy Birds Leaderboard</Text>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={() => setShowLeaderboard(false)}
+                >
+                  <X size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {leaderboardLoading ? (
+                <View style={styles.leaderboardLoadingContainer}>
+                  <ActivityIndicator size="large" color="#3498db" />
+                  <Text style={styles.leaderboardLoadingText}>
+                    Loading leaderboard...
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={leaderboard}
+                  keyExtractor={(item, index) => `leaderboard-${index}`}
+                  renderItem={({ item, index }) => (
+                    <View style={styles.leaderboardRow}>
+                      <Text style={styles.leaderboardRank}>{index + 1}</Text>
+                      <Text style={styles.leaderboardUsername}>
+                        {item.username || 'Anonymous'}
+                      </Text>
+                      <Text style={styles.leaderboardScore}>
+                        {item.top_score}
+                      </Text>
+                    </View>
+                  )}
+                  ListEmptyComponent={
+                    <Text style={styles.emptyLeaderboardText}>
+                      No scores recorded yet
+                    </Text>
+                  }
+                  contentContainerStyle={styles.leaderboardList}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
       </View>
     </TouchableWithoutFeedback>
   );
@@ -1223,6 +1576,110 @@ const styles = StyleSheet.create({
     textShadowColor: '#000',
     textShadowOffset: { width: 4, height: 4 },
     textShadowRadius: 0,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '85%',
+    maxHeight: '80%',
+    backgroundColor: '#1a2233',
+    borderRadius: 15,
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#3498db',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+    paddingBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  closeButton: {
+    padding: 5,
+  },
+  leaderboardList: {
+    flexGrow: 1,
+  },
+  leaderboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  leaderboardRank: {
+    width: 40,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textAlign: 'center',
+  },
+  leaderboardUsername: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingHorizontal: 10,
+  },
+  leaderboardScore: {
+    width: 60,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#3498db',
+    textAlign: 'right',
+  },
+  emptyLeaderboardText: {
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 20,
+  },
+  leaderboardLoadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  leaderboardLoadingText: {
+    color: '#fff',
+    marginTop: 10,
+    fontSize: 16,
+  },
+  // Offline mode styles
+  offlineIndicator: {
+    backgroundColor: 'rgba(255, 0, 0, 0.7)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+    position: 'absolute',
+    right: 10,
+    top: 10,
+  },
+  offlineText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  offlineWarning: {
+    color: '#ff6666',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 10,
+    fontWeight: 'bold',
   },
 });
 

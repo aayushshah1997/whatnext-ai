@@ -7,6 +7,7 @@ import { X } from 'lucide-react-native';
 import ScreenLayout from '../../components/ScreenLayout';
 import InputBar from '../../src/components/InputBar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getOrCreateUser, saveDrinkQuiz, getLastDrinkQuiz } from '../../src/lib/supabaseClient';
 
 // Type for quiz questions
 type QuestionKey = 'lastDrink' | 'alcoholPreference' | 'drinksConsumed' | 'mood' | 'flavorProfile' | 'socialContext';
@@ -178,7 +179,7 @@ const parseAIResponse = (content: string): DrinkRecommendation | null => {
               { drink: "Water with lemon", description: "A refreshing non-alcoholic option" },
               { drink: "Sparkling water", description: "Bubbly and fun without the alcohol" }
             ]
-          }]
+          }] as any
         };
       }
     }
@@ -287,6 +288,42 @@ export default function DrinksScreen() {
   const cardAnimations = useRef<Animated.Value[]>([]).current;
   const quizStartTime = useRef(Date.now());
   const insets = useSafeAreaInsets();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [lastDrinkQuiz, setLastDrinkQuiz] = useState<any>(null);
+  const [lastDrinkName, setLastDrinkName] = useState<string | null>(null);
+
+  // Load user ID and last drink quiz on component mount
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const user = await getOrCreateUser();
+        if (user) {
+          setUserId(user.id);
+          
+          // Get last drink quiz
+          const lastQuiz = await getLastDrinkQuiz(user.id);
+          if (lastQuiz.data) { // Check lastQuiz.data instead of lastQuiz
+            setLastDrinkQuiz(lastQuiz.data); // Store the actual data
+            
+            // Extract drink name from the result
+            try {
+              // Access ai_result from lastQuiz.data
+              const result = JSON.parse(lastQuiz.data.ai_result);
+              if (result && result.drinkName) {
+                setLastDrinkName(result.drinkName);
+              }
+            } catch (e) {
+              console.error('Error parsing last drink quiz result:', e);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error);
+      }
+    };
+    
+    loadUserData();
+  }, []);
 
   const handleAnswer = async (answer: string) => {
     const questionKey = ['lastDrink', 'alcoholPreference', 'drinksConsumed', 'mood', 'flavorProfile', 'socialContext'][currentQuestion] as QuestionKey;
@@ -321,6 +358,24 @@ export default function DrinksScreen() {
         setRecommendation(processedResult);
         setLoading(false);
         setShowRecommendation(true);
+        
+        // Save the quiz result to Supabase
+        if (userId && processedResult) {
+          try {
+            // Calculate a simple vibe score based on the quiz answers
+            const vibeScore = calculateVibeScore(newAnswers);
+            
+            await saveDrinkQuiz({
+              userId,
+              quizParams: JSON.stringify(newAnswers),
+              aiResult: JSON.stringify(processedResult),
+              vibeScore
+            });
+            console.log('Drink quiz saved to Supabase');
+          } catch (saveError) {
+            console.error('Error saving drink quiz:', saveError);
+          }
+        }
       } catch (err) {
         console.error('Error getting drink recommendation:', err);
         setLoading(false);
@@ -345,6 +400,29 @@ export default function DrinksScreen() {
         setLoading(false);
       }
     }
+  };
+
+  // Calculate a vibe score based on the quiz answers (0-100)
+  const calculateVibeScore = (answers: Answers): number => {
+    let score = 50; // Start with a neutral score
+    
+    // Adjust based on drinks consumed
+    const drinksConsumed = parseInt(answers.drinksConsumed) || 0;
+    if (drinksConsumed === 0) score += 10;
+    else if (drinksConsumed >= 4) score -= 15;
+    
+    // Adjust based on mood
+    if (answers.mood.includes('great')) score += 15;
+    if (answers.mood.includes('pace myself')) score += 5;
+    if (answers.mood.includes('too far gone')) score -= 20;
+    
+    // Adjust based on social context
+    if (answers.socialContext === 'Alone') score -= 5;
+    if (answers.socialContext === 'With Friends') score += 10;
+    if (answers.socialContext === 'Party') score += 15;
+    
+    // Ensure score is between 0-100
+    return Math.max(0, Math.min(100, score));
   };
 
   const handleFeedback = async (type: 'positive' | 'negative' | 'alternative' | 'tweak') => {
@@ -533,18 +611,37 @@ export default function DrinksScreen() {
           contentContainerStyle={showTweakSheet || showOtherInput ? { paddingBottom: 100 } : undefined}
           keyboardShouldPersistTaps="handled"
         >
-          {!showQuiz && !showRecommendation && (
-            <View style={styles.welcomeBannerContainer}>
-              <Text style={styles.welcomeBannerText}>{getWelcomeMessage(answers)}</Text>
-              <TouchableOpacity
+          {!showQuiz && !showRecommendation && !loading && (
+            <View style={styles.welcomeContainer}>
+              <Text style={styles.welcomeTitle}>Moses AI</Text>
+              <Text style={styles.welcomeSubtitle}>Your Personal Drink Advisor</Text>
+              
+              {lastDrinkName && (
+                <View style={styles.lastDrinkContainer}>
+                  <Text style={styles.lastDrinkTitle}>Previous Recommendation</Text>
+                  <Text style={styles.lastDrinkText}>
+                    Last time you had a <Text style={styles.lastDrinkHighlight}>{lastDrinkName}</Text>.
+                  </Text>
+                  <Text style={styles.lastDrinkSubtext}>Want something different today?</Text>
+                </View>
+              )}
+              
+              <TouchableOpacity 
                 style={styles.startButton}
                 onPress={() => {
                   setShowQuiz(true);
+                  setCurrentQuestion(0);
                   quizStartTime.current = Date.now();
                 }}
               >
-                <Text style={styles.startButtonText}>Start Quiz</Text>
+                <Text style={styles.startButtonText}>Start Drink Quiz</Text>
               </TouchableOpacity>
+              
+              <View style={styles.infoContainer}>
+                <Text style={styles.infoText}>
+                  Answer a few questions about your preferences, and Moses will recommend the perfect drink for you.
+                </Text>
+              </View>
             </View>
           )}
 
@@ -812,26 +909,57 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
-  welcomeBannerContainer: {
-    backgroundColor: '#1a2233',
-    borderRadius: 16,
-    padding: 28,
-    marginHorizontal: 10,
-    marginTop: 32,
+  welcomeContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+  },
+  welcomeTitle: {
+    fontSize: 30,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 10,
+  },
+  welcomeSubtitle: {
+    fontSize: 18,
+    color: '#fff',
+    marginBottom: 20,
+  },
+  lastDrinkContainer: {
+    backgroundColor: '#2C3E50',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    width: '90%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  welcomeBannerText: {
-    color: '#fff',
-    fontSize: 22,
+  lastDrinkTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
+    color: '#3498db',
+    marginBottom: 8,
     textAlign: 'center',
-    marginBottom: 18,
-    letterSpacing: 0.2,
+  },
+  lastDrinkText: {
+    fontSize: 16,
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  lastDrinkHighlight: {
+    fontWeight: 'bold',
+    color: '#e74c3c',
+  },
+  lastDrinkSubtext: {
+    fontSize: 14,
+    color: '#bdc3c7',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   startButton: {
     backgroundColor: '#3498db',
@@ -845,6 +973,24 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  infoContainer: {
+    backgroundColor: '#2C3E50',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+    width: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  infoText: {
+    fontSize: 16,
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 10,
   },
   quizContainer: {
     flex: 1,

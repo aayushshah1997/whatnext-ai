@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateUser, updateUserProfile } from '../src/lib/supabaseClient';
 import ScreenLayout from '../components/ScreenLayout';
+import { Users } from 'lucide-react-native';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -14,14 +15,26 @@ export default function SettingsScreen() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [storageMode, setStorageMode] = useState('unknown');
 
   useEffect(() => {
+    AsyncStorage.removeItem('offline_mode')
+      .then(() => console.log('Cleared offline mode flag on settings screen mount'))
+      .catch(err => console.error('Error clearing offline mode flag:', err));
+    
     loadUserData();
   }, []);
 
   const loadUserData = async () => {
     try {
       setLoading(true);
+      setStatusMessage('Loading your profile...');
+      
+      await AsyncStorage.removeItem('offline_mode');
+      setIsOfflineMode(false);
+      
       const user = await getOrCreateUser();
       
       if (user) {
@@ -30,10 +43,29 @@ export default function SettingsScreen() {
         setLastName(user.last_name || '');
         setEmail(user.email || '');
         setUsername(user.username || '');
+        
+        setStorageMode('supabase');
+        setIsOfflineMode(false);
+        setStatusMessage('');
       }
     } catch (error) {
       console.error('Error loading user data:', error);
-      Alert.alert('Error', 'Failed to load user data. Please try again.');
+      
+      try {
+        const userId = await AsyncStorage.getItem('user_id');
+        const userData = await AsyncStorage.getItem('user_data');
+        
+        if (userId && userData) {
+          const user = JSON.parse(userData);
+          setUserId(userId);
+          setFirstName(user.first_name || '');
+          setLastName(user.last_name || '');
+          setEmail(user.email || '');
+          setUsername(user.username || '');
+        }
+      } catch (e) {
+        console.error('Failed to load from AsyncStorage:', e);
+      }
     } finally {
       setLoading(false);
     }
@@ -43,52 +75,53 @@ export default function SettingsScreen() {
     try {
       setSaving(true);
       
-      // Generate fallback username if empty
       let updatedUsername = username;
       if (!updatedUsername) {
         updatedUsername = `user_${Math.random().toString(36).substring(2, 6)}`;
         setUsername(updatedUsername);
       }
       
-      // Prepare profile data
       const profileData = {
         first_name: firstName,
         last_name: lastName,
         email: email,
         username: updatedUsername,
-        updated_at: new Date()
+        updated_at: new Date().toISOString()
       };
       
-      // Update the user profile in Supabase
-      await updateUserProfile(userId, profileData);
+      await AsyncStorage.removeItem('offline_mode');
       
-      Alert.alert('Success', 'Your profile has been updated successfully.');
+      const result = await updateUserProfile(userId, profileData);
+      
+      if (result) {
+        Alert.alert('Success', 'Profile updated successfully');
+        
+        setIsOfflineMode(false);
+        setStatusMessage('');
+      } else {
+        throw new Error('Failed to update profile');
+      }
     } catch (error) {
       console.error('Error saving user data:', error);
-      Alert.alert('Error', 'Failed to save user data. Please try again.');
+      Alert.alert('Error', 'Failed to save profile. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <ScreenLayout>
+  return (
+    <ScreenLayout>
+      {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3498db" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
-      </ScreenLayout>
-    );
-  }
-
-  return (
-    <ScreenLayout>
+      ) : (
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <ScrollView style={styles.scrollContainer}>
           <Text style={styles.title}>Profile Settings</Text>
           
           <View style={styles.formGroup}>
@@ -152,8 +185,23 @@ export default function SettingsScreen() {
               <Text style={styles.saveButtonText}>Save Profile</Text>
             )}
           </TouchableOpacity>
+          
+          <View style={styles.sectionDivider} />
+          
+          <Text style={styles.sectionTitle}>Social</Text>
+          
+          <TouchableOpacity
+            style={styles.featureButton}
+            onPress={() => router.push('/friends')}
+          >
+            <View style={styles.featureButtonContent}>
+              <Users size={24} color="#fff" />
+              <Text style={styles.featureButtonText}>Friends</Text>
+            </View>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      )}
     </ScreenLayout>
   );
 }
@@ -180,7 +228,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 30,
+    marginBottom: 20,
     textAlign: 'center',
   },
   formGroup: {
@@ -219,5 +267,33 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#333',
+    marginVertical: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 15,
+  },
+  featureButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 20,
+  },
+  featureButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
   },
 });
