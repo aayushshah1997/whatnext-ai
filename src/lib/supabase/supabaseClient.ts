@@ -1311,3 +1311,129 @@ export const searchUsers = async (query: string) => {
     return { success: false, message: 'An unexpected error occurred', data: [] };
   }
 };
+
+// Get game leaderboard for accepted friends only
+export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
+  try {
+    console.log(`Getting friends leaderboard for game: ${gameName}`);
+    
+    const currentUser = await getOrCreateUser();
+    if (!currentUser) {
+      console.error('Cannot get friends leaderboard: Current user not found');
+      return [];
+    }
+    console.log(`Current user ID: ${currentUser.id}`);
+
+    // First, get the list of accepted friends
+    const friends = await getFriends();
+    console.log(`Found ${friends.length} accepted friends:`, friends);
+    
+    if (!friends || friends.length === 0) {
+      console.log('No accepted friends found for leaderboard');
+      return [];
+    }
+
+    // Extract friend IDs
+    const friendIds = friends.map((friend: any) => friend.friend_id);
+    console.log('Friend IDs for leaderboard query:', friendIds);
+    
+    // Add the current user's ID to include their scores too
+    const userIdsToQuery = [...friendIds, currentUser.id];
+    console.log('All user IDs for leaderboard query:', userIdsToQuery);
+    
+    // Try both 'sloppy_birds' and 'SloppyBirds' as game names
+    // Some games might be stored with different casing or formatting
+    const possibleGameNames = [gameName, 'SloppyBirds', 'sloppybirds', 'Sloppy Birds', 'sloppy-birds'];
+    
+    let leaderboardData: any[] = [];
+    
+    // Try each possible game name
+    for (const name of possibleGameNames) {
+      console.log(`Trying game name: ${name}`);
+      
+      const { data, error } = await supabase
+        .from('game_sessions')
+        .select('*, users(id, username, first_name, last_name)')
+        .eq('game_name', name)
+        .in('user_id', userIdsToQuery)
+        .order('score', { ascending: false })
+        .limit(limit);
+      
+      if (!error && data && data.length > 0) {
+        console.log(`Found ${data.length} scores with game name: ${name}`, data);
+        leaderboardData = data;
+        break;
+      }
+    }
+    
+    // If we found data, return it
+    if (leaderboardData.length > 0) {
+      return leaderboardData;
+    }
+    
+    // If no data found, try a more general query without game name filter
+    console.log('No scores found with specific game names, trying general query');
+    const { data: allScores, error: allScoresError } = await supabase
+      .from('game_sessions')
+      .select('*, users(id, username, first_name, last_name)')
+      .in('user_id', userIdsToQuery)
+      .order('score', { ascending: false })
+      .limit(20);
+    
+    if (allScoresError) {
+      console.error('Error fetching all game scores:', allScoresError);
+    } else if (allScores && allScores.length > 0) {
+      console.log('Found some game scores:', allScores);
+      // Filter after fetching to find any that might match our game
+      const filteredScores = allScores.filter(score => {
+        const scoreName = score.game_name?.toLowerCase() || '';
+        return possibleGameNames.some(name => scoreName.includes(name.toLowerCase()));
+      });
+      
+      if (filteredScores.length > 0) {
+        console.log('Filtered scores that match our game:', filteredScores);
+        return filteredScores;
+      }
+    }
+    
+    // Fallback to AsyncStorage
+    console.log('Trying AsyncStorage fallback');
+    const storedScores = await AsyncStorage.getItem('game_scores');
+    if (storedScores) {
+      const scores = JSON.parse(storedScores);
+      console.log('AsyncStorage scores:', scores);
+      
+      const filteredScores = scores
+        .filter((score: any) => {
+          const scoreName = score.game_name?.toLowerCase() || '';
+          return possibleGameNames.some(name => scoreName.includes(name.toLowerCase())) &&
+                 userIdsToQuery.includes(score.user_id);
+        })
+        .sort((a: any, b: any) => b.score - a.score)
+        .slice(0, limit);
+
+      console.log('Filtered AsyncStorage scores:', filteredScores);
+      
+      // For AsyncStorage fallback, we need to add user info
+      return await Promise.all(filteredScores.map(async (score: any) => {
+        const friend = friends.find((f: any) => f.friend_id === score.user_id);
+        const isCurrentUser = score.user_id === currentUser.id;
+        
+        return {
+          ...score,
+          users: { 
+            username: isCurrentUser ? currentUser.username : (friend ? friend.username : 'Unknown'),
+            first_name: isCurrentUser ? currentUser.first_name : (friend ? friend.first_name : ''),
+            last_name: isCurrentUser ? currentUser.last_name : (friend ? friend.last_name : '')
+          }
+        };
+      }));
+    }
+    
+    console.log('No leaderboard data found in any source');
+    return [];
+  } catch (error) {
+    console.error('Unexpected error in getFriendsLeaderboard:', error);
+    return [];
+  }
+};

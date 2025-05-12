@@ -17,7 +17,415 @@ import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
-import { saveGameScore, getUserHighScore, getOrCreateUser } from '../../lib/supabase/supabaseClient';
+import { saveGameScore, getUserHighScore, getOrCreateUser, getFriendsLeaderboard } from '../../lib/supabase/supabaseClient';
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  gameContent: {
+    flex: 1,
+    position: 'relative',
+  },
+  backgroundImage: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  bird: {
+    position: 'absolute',
+    width: 70,
+    height: 70,
+    left: Dimensions.get('window').width / 3 - 70 / 2,
+  },
+  birdImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'contain',
+  },
+  obstacleContainer: {
+    position: 'absolute',
+    overflow: 'visible',
+    backgroundColor: 'transparent',
+  },
+  obstacleImage: {
+    position: 'absolute',
+    resizeMode: 'contain',
+  },
+  iceStackImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'contain', // Changed from 'stretch' to 'contain'
+  },
+  // Loading screen styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  loadingText: {
+    color: '#FFD700', // Golden yellow
+    fontSize: 24,
+    fontWeight: 'bold',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  loadingSpinner: {
+    marginTop: 20,
+  },
+  // UI layer styles
+  uiLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    pointerEvents: 'box-none',
+  },
+  // Header styles
+  header: {
+    position: 'absolute',
+    top: Math.max(Platform.OS === 'ios' ? 50 : 20, 250 / 4),
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    zIndex: 100,
+  },
+  backButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    padding: 8,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Score display
+  scoreText: {
+    position: 'absolute',
+    top: 250 / 2 - 35, // Position above the top boundary
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 70,
+    color: '#FFD700', // Golden yellow
+    fontWeight: 'bold',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 4, height: 4 },
+    textShadowRadius: 0,
+  },
+  // Start screen styles
+  startScreenContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  gameTitle: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    marginBottom: 10,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 4, height: 4 },
+    textShadowRadius: 0,
+  },
+  chooseVibeText: {
+    fontSize: 24,
+    color: '#FFD700', // Golden yellow
+    marginBottom: 30,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 3, height: 3 },
+    textShadowRadius: 0,
+  },
+  birdSelectorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    width: '100%',
+  },
+  arrowButton: {
+    padding: 10,
+  },
+  birdPreviewContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  birdPreviewImage: {
+    width: 100,
+    height: 100,
+    marginBottom: 10,
+  },
+  birdName: {
+    fontSize: 18,
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 30,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    marginHorizontal: 5,
+  },
+  activeDot: {
+    backgroundColor: '#fff',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  startButton: {
+    backgroundColor: '#3498db',
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    marginBottom: 40,
+  },
+  startButtonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  leaderboardContainer: {
+    flexDirection: 'row',
+    width: '80%',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  leaderboardColumn: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  leaderboardDivider: {
+    width: 1,
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    marginHorizontal: 20,
+  },
+  leaderboardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    marginBottom: 10,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+    textAlign: 'center',
+  },
+  highScoreText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 3, height: 3 },
+    textShadowRadius: 0,
+  },
+  leaderboardEntries: {
+    alignItems: 'center',
+  },
+  leaderboardEntry: {
+    fontSize: 18,
+    color: '#FFD700', // Golden yellow
+    marginVertical: 2,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  currentUserEntry: {
+    color: '#00FFFF', // Cyan color to highlight current user
+    fontWeight: 'bold',
+  },
+  // Modal styles
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  leaderboardModal: {
+    width: '80%',
+    maxHeight: '80%',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#FFD700',
+  },
+  leaderboardModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textAlign: 'center',
+    marginBottom: 20,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  leaderboardModalContent: {
+    maxHeight: '70%',
+  },
+  leaderboardModalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  leaderboardRank: {
+    width: 30,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textAlign: 'center',
+  },
+  leaderboardModalName: {
+    flex: 1,
+    fontSize: 18,
+    color: '#FFD700',
+    paddingHorizontal: 10,
+  },
+  leaderboardModalScore: {
+    width: 60,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textAlign: 'right',
+  },
+  leaderboardModalEmptyText: {
+    fontSize: 18,
+    color: '#FFD700',
+    textAlign: 'center',
+    padding: 20,
+  },
+  leaderboardModalCloseButton: {
+    backgroundColor: '#3498db',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginTop: 20,
+    alignSelf: 'center',
+  },
+  leaderboardModalCloseText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    textAlign: 'center',
+  },
+  // Game over styles
+  messageContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  gameOverText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 4, height: 4 },
+    textShadowRadius: 0,
+  },
+  finalScoreText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    marginTop: 10,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 3, height: 3 },
+    textShadowRadius: 0,
+  },
+  restartButton: {
+    marginTop: 30,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  restartButtonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textAlign: 'center',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
+  },
+  startText: {
+    position: 'absolute',
+    top: Dimensions.get('window').height / 2 - 50,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFD700', // Golden yellow
+    textShadowColor: '#000',
+    textShadowOffset: { width: 4, height: 4 },
+    textShadowRadius: 0,
+  },
+  newRecordBanner: {
+    position: 'absolute',
+    top: 100,
+    alignSelf: 'center',
+    backgroundColor: '#FFD700',
+    padding: 16,
+    borderRadius: 12,
+    elevation: 5,
+    zIndex: 1000,
+  },
+  newRecordText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  homeNewHighScoreBanner: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 15,
+    marginBottom: 15,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  homeNewHighScoreText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+    textAlign: 'center',
+  },
+});
 
 // Get screen dimensions
 const { width, height } = Dimensions.get('window');
@@ -143,6 +551,9 @@ const SloppyBirds = () => {
   // Loading state
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [isLoadingHighScore, setIsLoadingHighScore] = useState(true);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(true);
+  const [friendsLeaderboard, setFriendsLeaderboard] = useState<any[]>([]);
+  const [showFullLeaderboard, setShowFullLeaderboard] = useState(false);
   
   // Game state
   const [gameStarted, setGameStarted] = useState(false);
@@ -218,10 +629,26 @@ const SloppyBirds = () => {
     }
   };
   
+  // Fetch friends leaderboard
+  const fetchFriendsLeaderboard = async () => {
+    try {
+      setIsLoadingLeaderboard(true);
+      const leaderboardData = await getFriendsLeaderboard('Sloppy Birds', 10);
+      console.log('Fetched friends leaderboard:', leaderboardData);
+      setFriendsLeaderboard(leaderboardData || []);
+    } catch (error) {
+      console.error('Error fetching friends leaderboard:', error);
+      setFriendsLeaderboard([]);
+    } finally {
+      setIsLoadingLeaderboard(false);
+    }
+  };
+
   // Load assets when component mounts
   useEffect(() => {
     loadAssets();
     fetchUserAndHighScore();
+    fetchFriendsLeaderboard();
   }, []);
   
   // Get a random bottle index (avoiding consecutive repeats)
@@ -692,6 +1119,9 @@ const SloppyBirds = () => {
           metadata: { bird: birds[selectedBirdIndex].name }
         });
         
+        // Refresh the leaderboard to include the new score
+        fetchFriendsLeaderboard();
+        
         // Get the latest high score from Supabase
         const latestHighScore = await getUserHighScore(userId);
         console.log('Latest high score after save:', latestHighScore);
@@ -1007,11 +1437,32 @@ const SloppyBirds = () => {
                 <View style={styles.leaderboardDivider} />
                 
                 <View style={styles.leaderboardColumn}>
-                  <Text style={[styles.leaderboardTitle, { fontSize: 16 }]}>Leaderboard</Text>
+                  <TouchableOpacity onPress={() => setShowFullLeaderboard(true)}>
+                    <Text style={[styles.leaderboardTitle, { fontSize: 16 }]}>Leaderboard</Text>
+                  </TouchableOpacity>
                   <View style={styles.leaderboardEntries}>
-                    <Text style={styles.leaderboardEntry}>—</Text>
-                    <Text style={styles.leaderboardEntry}>—</Text>
-                    <Text style={styles.leaderboardEntry}>—</Text>
+                    {isLoadingLeaderboard ? (
+                      <ActivityIndicator size="small" color="#FFD700" />
+                    ) : friendsLeaderboard.length > 0 ? (
+                      // Show only top 3 friends in the start screen
+                      friendsLeaderboard.slice(0, 3).map((entry, index) => {
+                        // Get the display name - username or You for current user
+                        const isCurrentUser = entry.user_id === userId;
+                        const displayName = isCurrentUser ? 'You' : entry.users?.username || 'Friend';
+                        
+                        return (
+                          <Text key={index} style={[styles.leaderboardEntry, isCurrentUser && styles.currentUserEntry]}>
+                            {displayName}: {entry.score}
+                          </Text>
+                        );
+                      })
+                    ) : (
+                      <>
+                        <Text style={styles.leaderboardEntry}>No scores yet</Text>
+                        <Text style={styles.leaderboardEntry}>Play a game or</Text>
+                        <Text style={styles.leaderboardEntry}>add friends</Text>
+                      </>
+                    )}
                   </View>
                 </View>
               </View>
@@ -1051,331 +1502,48 @@ const SloppyBirds = () => {
             </Animated.Text>
           )}
         </View>
+        
+        {/* Full Leaderboard Modal */}
+        {showFullLeaderboard && (
+          <View style={styles.modalOverlay}>
+            <View style={styles.leaderboardModal}>
+              <Text style={styles.leaderboardModalTitle}>Friends Leaderboard</Text>
+              
+              <View style={styles.leaderboardModalContent}>
+                {isLoadingLeaderboard ? (
+                  <ActivityIndicator size="large" color="#FFD700" />
+                ) : friendsLeaderboard.length > 0 ? (
+                  friendsLeaderboard.map((entry, index) => {
+                    const isCurrentUser = entry.user_id === userId;
+                    const displayName = isCurrentUser ? 'You' : entry.users?.username || 'Friend';
+                    
+                    return (
+                      <View key={index} style={styles.leaderboardModalRow}>
+                        <Text style={styles.leaderboardRank}>{index + 1}</Text>
+                        <Text style={[styles.leaderboardModalName, isCurrentUser && styles.currentUserEntry]}>
+                          {displayName}
+                        </Text>
+                        <Text style={styles.leaderboardModalScore}>{entry.score}</Text>
+                      </View>
+                    );
+                  })
+                ) : (
+                  <Text style={styles.leaderboardModalEmptyText}>No friends scores found</Text>
+                )}
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.leaderboardModalCloseButton}
+                onPress={() => setShowFullLeaderboard(false)}
+              >
+                <Text style={styles.leaderboardModalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
     </TouchableWithoutFeedback>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  gameContent: {
-    flex: 1,
-    position: 'relative',
-  },
-  backgroundImage: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  bird: {
-    position: 'absolute',
-    width: BIRD_WIDTH,
-    height: BIRD_HEIGHT,
-    left: width / 3 - BIRD_WIDTH / 2,
-  },
-  birdImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
-  },
-  obstacleContainer: {
-    position: 'absolute',
-    overflow: 'visible',
-    backgroundColor: 'transparent',
-  },
-  obstacleImage: {
-    position: 'absolute',
-    resizeMode: 'contain',
-  },
-  iceStackImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain', // Changed from 'stretch' to 'contain'
-  },
-  // Loading screen styles
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-  },
-  loadingText: {
-    color: '#FFD700', // Golden yellow
-    fontSize: 24,
-    fontWeight: 'bold',
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-  },
-  loadingSpinner: {
-    marginTop: 20,
-  },
-  // UI layer styles
-  uiLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 10,
-    pointerEvents: 'box-none',
-  },
-  // Header styles
-  header: {
-    position: 'absolute',
-    top: Math.max(Platform.OS === 'ios' ? 50 : 20, TOP_BOUNDARY / 4),
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-    zIndex: 100,
-  },
-  backButton: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 20,
-    padding: 8,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  // Score display
-  scoreText: {
-    position: 'absolute',
-    top: TOP_BOUNDARY / 2 - 35, // Position above the top boundary
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    fontSize: 70,
-    color: '#FFD700', // Golden yellow
-    fontWeight: 'bold',
-    textShadowColor: '#000',
-    textShadowOffset: { width: 4, height: 4 },
-    textShadowRadius: 0,
-  },
-  // Start screen styles
-  startScreenContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  gameTitle: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    marginBottom: 10,
-    textShadowColor: '#000',
-    textShadowOffset: { width: 4, height: 4 },
-    textShadowRadius: 0,
-  },
-  chooseVibeText: {
-    fontSize: 24,
-    color: '#FFD700', // Golden yellow
-    marginBottom: 30,
-    textShadowColor: '#000',
-    textShadowOffset: { width: 3, height: 3 },
-    textShadowRadius: 0,
-  },
-  birdSelectorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    width: '100%',
-  },
-  arrowButton: {
-    padding: 10,
-  },
-  birdPreviewContainer: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  birdPreviewImage: {
-    width: 100,
-    height: 100,
-    marginBottom: 10,
-  },
-  birdName: {
-    fontSize: 18,
-    color: '#FFD700', // Golden yellow
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-  },
-  dotsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 30,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    marginHorizontal: 5,
-  },
-  activeDot: {
-    backgroundColor: '#fff',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  startButton: {
-    backgroundColor: '#3498db',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 30,
-    marginBottom: 40,
-  },
-  startButtonText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-  },
-  leaderboardContainer: {
-    flexDirection: 'row',
-    width: '80%',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  leaderboardColumn: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  leaderboardDivider: {
-    width: 1,
-    height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    marginHorizontal: 20,
-  },
-  leaderboardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    marginBottom: 10,
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-    textAlign: 'center',
-  },
-  highScoreText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    textShadowColor: '#000',
-    textShadowOffset: { width: 3, height: 3 },
-    textShadowRadius: 0,
-  },
-  leaderboardEntries: {
-    alignItems: 'center',
-  },
-  leaderboardEntry: {
-    fontSize: 18,
-    color: '#FFD700', // Golden yellow
-    marginVertical: 2,
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-  },
-  // Game over styles
-  messageContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-  },
-  gameOverText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    textShadowColor: '#000',
-    textShadowOffset: { width: 4, height: 4 },
-    textShadowRadius: 0,
-  },
-  finalScoreText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    marginTop: 10,
-    textShadowColor: '#000',
-    textShadowOffset: { width: 3, height: 3 },
-    textShadowRadius: 0,
-  },
-  restartButton: {
-    marginTop: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  restartButtonText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    textAlign: 'center',
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
-  },
-  startText: {
-    position: 'absolute',
-    top: height / 2 - 50,
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFD700', // Golden yellow
-    textShadowColor: '#000',
-    textShadowOffset: { width: 4, height: 4 },
-    textShadowRadius: 0,
-  },
-  newRecordBanner: {
-    position: 'absolute',
-    top: 100,
-    alignSelf: 'center',
-    backgroundColor: '#FFD700',
-    padding: 16,
-    borderRadius: 12,
-    elevation: 5,
-    zIndex: 1000,
-  },
-  newRecordText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  homeNewHighScoreBanner: {
-    backgroundColor: '#FFD700',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 15,
-    marginBottom: 15,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-  },
-  homeNewHighScoreText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000',
-    textAlign: 'center',
-  },
-});
+}
 
 export default SloppyBirds;
