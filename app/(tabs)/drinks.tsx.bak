@@ -19,7 +19,7 @@ const questions = [
   },
   {
     question: 'What type of alcohol do you prefer?',
-    options: ['Beer', 'Wine', 'Whiskey', 'Vodka', 'Tequila', 'Gin', 'Other']
+    options: ['Beer', 'Wine', 'Whiskey', 'Vodka', 'Tequila', 'Rum', 'Gin', 'Other']
   },
   {
     question: 'How many drinks have you had today?',
@@ -769,8 +769,6 @@ export default function DrinksScreen() {
               </Animated.View>
             )}
             
-            {/* Hydration Tips Section removed as requested */}
-            
             {/* All Recommendations in Horizontal Scroll */}
             <View style={styles.alternativesContainer}>
               <Text style={styles.alternativesTitle}>Drink Recommendations</Text>
@@ -803,16 +801,6 @@ export default function DrinksScreen() {
                     </Text>
                     
                     <Text style={styles.alternativeDescription}>
-                      {recommendation.mainSuggestion.description}
-                    </Text>
-                    
-                    {/* Recipe Link */}
-                    <TouchableOpacity style={styles.alternativeRecipeLink}>
-                      <Link href={'#'}>
-                        <Text style={styles.alternativeRecipeLinkText}>📖 View Recipe</Text>
-                      </Link>
-                    </TouchableOpacity>
-                  </TouchableOpacity>
                 ) : recommendation.mainDrink ? (
                   <TouchableOpacity 
                     style={styles.alternativeHorizontalCard}
@@ -955,7 +943,10 @@ export default function DrinksScreen() {
           </View>
         ) : (
           <View style={styles.recommendationContainer}>
-            {/* No Recommendation section removed as requested */}
+            <Text style={styles.recommendationTitle}>No Recommendation</Text>
+            <Text style={styles.drinkDescription}>
+              🧠 I need a moment. Grab a sip of water while I rethink your drink!
+            </Text>
           </View>
         )}
       </View>
@@ -1050,18 +1041,16 @@ const styles = StyleSheet.create({
   },
   quizContainer: {
     flex: 1,
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    paddingTop: 80, // Add significant padding to place content well below the back button
   },
   questionText: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 30,
     textAlign: 'center',
-    marginTop: 0,
   },
   optionsContainer: {
     width: '100%',
@@ -1095,7 +1084,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     alignItems: 'stretch',
     padding: 15,
-    paddingTop: 60, // Add padding to the top to place content below the back button
+    paddingTop: 5,
   },
   recommendationTitle: {
     fontSize: 24,
@@ -1343,22 +1332,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     fontWeight: 'bold',
-  },
-  hydrationTipsContainer: {
-    marginTop: 10,
-    marginBottom: 20,
-    paddingHorizontal: 15,
-  },
-  hydrationTipCard: {
-    backgroundColor: '#3498db',
-    padding: 15,
-    borderRadius: 10,
-    marginTop: 10,
-  },
-  hydrationTipText: {
-    fontSize: 16,
-    color: '#fff',
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });

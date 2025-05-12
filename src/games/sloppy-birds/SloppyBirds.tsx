@@ -17,6 +17,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
+import { saveGameScore, getUserHighScore, getOrCreateUser } from '../../lib/supabase/supabaseClient';
 
 // Get screen dimensions
 const { width, height } = Dimensions.get('window');
@@ -141,12 +142,18 @@ const SloppyBirds = () => {
   
   // Loading state
   const [assetsLoaded, setAssetsLoaded] = useState(false);
+  const [isLoadingHighScore, setIsLoadingHighScore] = useState(true);
   
   // Game state
   const [gameStarted, setGameStarted] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
+  const scoreRef = useRef(0);
   const [highScore, setHighScore] = useState(0);
+  const [userId, setUserId] = useState('');
+  const [isNewHighScore, setIsNewHighScore] = useState(false);
+  // Track if we should show the new high score message on the home screen
+  const [showNewHighScoreOnHome, setShowNewHighScoreOnHome] = useState(false);
   
   // Countdown state
   const [countdown, setCountdown] = useState(0);
@@ -185,7 +192,37 @@ const SloppyBirds = () => {
   useEffect(() => {
     gameStateRef.current.gameStarted = gameStarted;
     gameStateRef.current.gameOver = gameOver;
-  }, [gameStarted, gameOver]);
+    gameStateRef.current.score = score;
+    gameStateRef.current.highScore = highScore;
+  }, [gameStarted, gameOver, score, highScore]);
+  
+  // Fetch user and high score
+  const fetchUserAndHighScore = async () => {
+    try {
+      setIsLoadingHighScore(true);
+      // Get or create user - using the improved function that ensures one user per device
+      const user = await getOrCreateUser();
+      if (user && user.id) {
+        setUserId(user.id);
+        // Fetch high score
+        const userHighScore = await getUserHighScore(user.id);
+        console.log('Fetched high score on init:', userHighScore);
+        setHighScore(userHighScore);
+        // Also update the game state ref
+        gameStateRef.current.highScore = userHighScore;
+      }
+    } catch (error) {
+      console.error('Error fetching user or high score:', error);
+    } finally {
+      setIsLoadingHighScore(false);
+    }
+  };
+  
+  // Load assets when component mounts
+  useEffect(() => {
+    loadAssets();
+    fetchUserAndHighScore();
+  }, []);
   
   // Get a random bottle index (avoiding consecutive repeats)
   const getRandomBottleIndex = (): number => {
@@ -211,6 +248,9 @@ const SloppyBirds = () => {
   
   // Initialize game
   const startGame = () => {
+    // Clear the new high score message when starting a new game
+    setShowNewHighScoreOnHome(false);
+    
     // Start countdown
     setIsCountingDown(true);
     setCountdown(3);
@@ -540,6 +580,7 @@ const SloppyBirds = () => {
           updatedPipe.passed = true;
           setScore(prevScore => {
             const newScore = prevScore + 1;
+            scoreRef.current = newScore;
             if (newScore > highScore) {
               setHighScore(newScore);
             }
@@ -566,16 +607,23 @@ const SloppyBirds = () => {
   };
   
   // Reset to start screen
-  const resetToStartScreen = () => {
+  const resetToStartScreen = async () => {
     console.log('Resetting to start screen...');
     setGameStarted(false);
     setGameOver(false);
     setScore(0);
+    scoreRef.current = 0;
+    
+    // If this was a new high score, show it on the home screen
+    if (isNewHighScore) {
+      setShowNewHighScoreOnHome(true);
+    }
+    setIsNewHighScore(false);
     
     // Reset bird position and velocity
     birdPositionRef.current.setValue(height / 2 - BIRD_HEIGHT / 2);
-    birdRotation.setValue(0);
     birdVelocityRef.current = 0;
+    birdRotation.setValue(0);
     
     // Reset pipes
     setPipes([]);
@@ -592,11 +640,33 @@ const SloppyBirds = () => {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
     }
+    
+    // Refresh high score from Supabase to ensure we have the latest
+    if (userId) {
+      try {
+        const latestHighScore = await getUserHighScore(userId);
+        console.log('Latest high score from Supabase:', latestHighScore);
+        if (latestHighScore > 0) {
+          setHighScore(latestHighScore);
+        }
+      } catch (error) {
+        console.error('Error refreshing high score:', error);
+      }
+    }
+    
+    // Make sure gameStateRef is updated with current high score
+    gameStateRef.current = { 
+      gameStarted: false, 
+      gameOver: false, 
+      score: 0, 
+      highScore: highScore // Preserve the high score
+    };
   };
   
   // End game
-  const endGame = () => {
-    console.log('Game over! Score:', score);
+  const endGame = async () => {
+    const finalScore = scoreRef.current;
+    console.log('Game over! Score:', finalScore);
     setGameOver(true);
     
     // Stop animations
@@ -609,6 +679,39 @@ const SloppyBirds = () => {
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
+    }
+    
+    // Save score to Supabase if user exists and score is greater than 0
+    if (userId && finalScore > 0) {
+      try {
+        console.log('Saving score to Supabase:', finalScore);
+        await saveGameScore({
+          user_id: userId,
+          game_name: 'Sloppy Birds',
+          score: finalScore,
+          metadata: { bird: birds[selectedBirdIndex].name }
+        });
+        
+        // Get the latest high score from Supabase
+        const latestHighScore = await getUserHighScore(userId);
+        console.log('Latest high score after save:', latestHighScore);
+        
+        // Update high score if current score is higher than the stored high score
+        if (finalScore > latestHighScore) {
+          setHighScore(finalScore);
+          setIsNewHighScore(true); // trigger celebration
+        } else {
+          // Make sure we display the correct high score even if it wasn't just set
+          setHighScore(latestHighScore);
+        }
+      } catch (error) {
+        console.error('Error saving game score:', error);
+        // Still update local high score if Supabase fails
+        if (finalScore > highScore) {
+          setHighScore(finalScore);
+          setIsNewHighScore(true);
+        }
+      }
     }
   };
   
@@ -659,16 +762,10 @@ const SloppyBirds = () => {
     );
   };
   
-  // Preload assets on component mount
-  useEffect(() => {
-    loadAssets();
-  }, []);
-  
-  // Create combined images for each obstacle type instead of trying to position them separately
+  // Render obstacles
   const renderObstacles = () => {
     return (
       <>
-        {/* Pipes (now bottles and glasses with ice stacks) */}
         {pipes.map(pipe => (
           <React.Fragment key={pipe.id}>
             {/* Top obstacle (ice cube with bottle below) */}
@@ -874,6 +971,20 @@ const SloppyBirds = () => {
                 ))}
               </View>
               
+              {/* New High Score Banner on Home Screen */}
+              {showNewHighScoreOnHome && (
+                <View style={styles.homeNewHighScoreBanner}>
+                  <Text style={styles.homeNewHighScoreText}>New High Score!</Text>
+                </View>
+              )}
+              
+              {/* New High Score Banner on Home Screen */}
+              {showNewHighScoreOnHome && (
+                <View style={styles.homeNewHighScoreBanner}>
+                  <Text style={styles.homeNewHighScoreText}>New High Score!</Text>
+                </View>
+              )}
+              
               {/* Start button */}
               <TouchableOpacity 
                 style={styles.startButton} 
@@ -886,7 +997,11 @@ const SloppyBirds = () => {
               <View style={styles.leaderboardContainer}>
                 <View style={styles.leaderboardColumn}>
                   <Text style={styles.leaderboardTitle}>High-score</Text>
-                  <Text style={styles.highScoreText}>{highScore}</Text>
+                  {isLoadingHighScore ? (
+                    <ActivityIndicator size="small" color="#FFD700" />
+                  ) : (
+                    <Text style={styles.highScoreText}>{highScore}</Text>
+                  )}
                 </View>
                 
                 <View style={styles.leaderboardDivider} />
@@ -906,14 +1021,18 @@ const SloppyBirds = () => {
           {/* Game over message */}
           {gameOver && (
             <View style={styles.messageContainer}>
-              <Text style={styles.gameOverText}>Game Over</Text>
+              {isNewHighScore && (
+                <Animated.View style={styles.newRecordBanner}>
+                  <Text style={styles.newRecordText}> New High Score! </Text>
+                </Animated.View>
+              )}
+              <Text style={styles.gameOverText}>Game Over!</Text>
               <Text style={styles.finalScoreText}>Score: {score}</Text>
               <TouchableOpacity
                 style={styles.restartButton}
                 onPress={resetToStartScreen}
-                activeOpacity={0.7}
               >
-                <Text style={styles.restartButtonText}>Restart</Text>
+                <Text style={styles.restartButtonText}>Play Again</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1223,6 +1342,39 @@ const styles = StyleSheet.create({
     textShadowColor: '#000',
     textShadowOffset: { width: 4, height: 4 },
     textShadowRadius: 0,
+  },
+  newRecordBanner: {
+    position: 'absolute',
+    top: 100,
+    alignSelf: 'center',
+    backgroundColor: '#FFD700',
+    padding: 16,
+    borderRadius: 12,
+    elevation: 5,
+    zIndex: 1000,
+  },
+  newRecordText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  homeNewHighScoreBanner: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 15,
+    marginBottom: 15,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  homeNewHighScoreText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+    textAlign: 'center',
   },
 });
 

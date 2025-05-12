@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Modal, Dimensions, TextInput, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform, Animated, TouchableWithoutFeedback, Keyboard, Image, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CircleHelp as HelpCircle, Wine, Beer, Utensils, Gamepad2, Send, X } from 'lucide-react-native';
+import { CircleHelp as HelpCircle, Wine, Beer, Utensils, Gamepad2, Send, X, Settings, Users } from 'lucide-react-native';
 import ScreenLayout from '../../components/ScreenLayout';
 import { generateDrinkRecommendation } from '../../src/utils/mosesAI';
 import { MosesContext, DrinkRecommendation, FeedbackType } from '../../src/types/moses';
@@ -175,6 +175,21 @@ export default function HomeScreen() {
   return (
     <ScreenLayout hideBackButton={true}>
       <View style={styles.container}>
+        {/* Settings Button */}
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={() => router.push('/settings')}
+        >
+          <Settings size={24} color="#fff" />
+        </TouchableOpacity>
+        
+        {/* Friends Button */}
+        <TouchableOpacity 
+          style={styles.friendsButton}
+          onPress={() => router.push('/friends')}
+        >
+          <Users size={24} color="#fff" />
+        </TouchableOpacity>
         <View style={styles.circleContainer}>
           {/* Outer circle background */}
           <View style={[styles.circleBackground, { width: OUTER_CIRCLE_SIZE, height: OUTER_CIRCLE_SIZE }]} />
@@ -358,6 +373,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  settingsButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 20,
+    right: 20,
+    backgroundColor: 'rgba(44, 62, 80, 0.7)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  friendsButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 20,
+    right: 80, // Positioned to the left of the settings button
+    backgroundColor: 'rgba(44, 62, 80, 0.7)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+
   circleContainer: {
     width: OUTER_CIRCLE_SIZE,
     height: OUTER_CIRCLE_SIZE,
