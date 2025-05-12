@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
 import { saveGameScore, getUserHighScore, getOrCreateUser, getFriendsLeaderboard } from '../../lib/supabase/supabaseClient';
+import { Easing } from 'react-native-reanimated';
 
 const styles = StyleSheet.create({
   container: {
@@ -434,6 +435,7 @@ const { width, height } = Dimensions.get('window');
 const BIRD_WIDTH = 70;
 const BIRD_HEIGHT = 70;
 const PIPE_WIDTH = 120; // Pipe width increased by 20%
+const POWERUP_SIZE = 60; // Size of the powerup
 const MIN_PIPE_GAP = 180; // Minimum gap between pipes
 const MAX_PIPE_GAP = 250; // Maximum gap between pipes
 const GRAVITY = 0.8;
@@ -472,6 +474,18 @@ const BOTTLE_COLLISION_WIDTH_FACTOR = 0.6; // Bottles are narrower than their co
 const BOTTLE_COLLISION_HEIGHT_FACTOR = 0.6; // Only use 60% of the bottle height for collision
 const GLASS_COLLISION_WIDTH_FACTOR = 0.7; // Glasses are narrower than their container
 const GLASS_COLLISION_HEIGHT_FACTOR = 0.7; // Only use 70% of the glass height for collision
+
+// Define powerup type
+type PowerUp = {
+  id: number;
+  x: number;
+  y: number;
+  type: string;
+  collected: boolean;
+  floatOffset: number;
+  floatDirection: number;
+  floatSpeed: number;
+};
 
 // Define pipe type
 interface Pipe {
@@ -523,13 +537,20 @@ const bottomIceStackImages = [
   require('../../../sloppy_birds assets/ice-cubes/bottom/5-stack-bottom.png'),
 ];
 
+// Powerup images
+const powerUpImages: Record<string, any> = {
+  'Finance bird': require('../../../sloppy_birds assets/power-ups/powder-up.png'),
+  'Rasta bird': require('../../../sloppy_birds assets/power-ups/weed-up.png'),
+  'Artsy bird': require('../../../sloppy_birds assets/power-ups/shroom-up.png'),
+};
+
 // Bird types
 interface BirdType {
   image: any;
   name: string;
 }
 
-// Available birds
+// Available birds with their normal and powered-up states
 const birds: BirdType[] = [
   {
     image: require('../../../sloppy_birds assets/birds/financebird.png'),
@@ -544,6 +565,13 @@ const birds: BirdType[] = [
     name: 'Artsy bird'
   }
 ];
+
+// Powered-up bird images
+const poweredUpBirdImages: Record<string, any> = {
+  'Finance bird': require('../../../sloppy_birds assets/birds/financebirdcoked.png'),
+  'Rasta bird': require('../../../sloppy_birds assets/birds/rastabirdhigh.png'),
+  'Artsy bird': require('../../../sloppy_birds assets/birds/artsybirdtripping.png'),
+};
 
 const SloppyBirds = () => {
   const router = useRouter();
@@ -584,11 +612,19 @@ const SloppyBirds = () => {
   const birdPositionRef = useRef(new Animated.Value(height / 2 - BIRD_HEIGHT / 2));
   const birdRotation = useRef(new Animated.Value(0)).current;
   const birdVelocityRef = useRef(0);
+  const [isPoweredUp, setIsPoweredUp] = useState(false);
+  const powerUpTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Pipes state
   const [pipes, setPipes] = useState<Pipe[]>([]);
   const pipesRef = useRef<Pipe[]>([]);
   const pipesPassedRef = useRef(new Set<number>());
+  
+  // Powerups state
+  const [powerUps, setPowerUps] = useState<PowerUp[]>([]);
+  const powerUpsRef = useRef<PowerUp[]>([]);
+  const powerUpTimerId = useRef<NodeJS.Timeout | null>(null);
+  const lastPowerUpTime = useRef(0);
   
   // Track last used image indexes to avoid repetition
   const lastBottleIndexRef = useRef(-1);
@@ -747,12 +783,20 @@ const SloppyBirds = () => {
           setPipes([]);
           pipesRef.current = [];
           
+          // Reset powerups
+          setPowerUps([]);
+          powerUpsRef.current = [];
+          lastPowerUpTime.current = Date.now();
+          
           // Start game loop
           lastUpdateTime.current = Date.now();
           animationFrameId.current = requestAnimationFrame(gameLoop);
           
           // Start pipe generator
           pipeTimerId.current = setInterval(addPipe, PIPE_INTERVAL);
+          
+          // Start powerup generator
+          powerUpTimerId.current = setInterval(addPowerUp, 5000); // Add a powerup every 5 seconds
         }, 1000); // 1 second delay after countdown reaches 0
       }
     }, 1000);
@@ -835,6 +879,8 @@ const SloppyBirds = () => {
       await Promise.all([
         // Preload all bird images
         ...birds.map(bird => Asset.loadAsync(bird.image)),
+        // Preload all powered-up bird images
+        ...Object.values(poweredUpBirdImages).map(image => Asset.loadAsync(image)),
         // Preload all bottle images
         ...bottleImages.map(image => Asset.loadAsync(image)),
         // Preload all glass images
@@ -842,6 +888,8 @@ const SloppyBirds = () => {
         // Preload all ice stack images
         ...topIceStackImages.map(image => Asset.loadAsync(image)),
         ...bottomIceStackImages.map(image => Asset.loadAsync(image)),
+        // Preload all powerup images
+        ...Object.values(powerUpImages).map(image => Asset.loadAsync(image)),
         // Preload background image
         Asset.loadAsync(require('../../../assets/images/nyc-bg.png')),
       ]);
@@ -947,6 +995,69 @@ const SloppyBirds = () => {
     return false;
   };
   
+  // Generate a new powerup
+  const addPowerUp = () => {
+    // Ensure we don't add powerups if the game is over
+    if (gameStateRef.current.gameOver) return;
+    
+    // Get the current bird type
+    const currentBirdType = birds[selectedBirdIndex].name;
+    
+    // Calculate a random position for the powerup
+    // Keep it within the playable area
+    const powerUpX = width + 50; // Start off screen to the right
+    const powerUpY = TOP_BOUNDARY + Math.random() * (BOTTOM_BOUNDARY - TOP_BOUNDARY - POWERUP_SIZE);
+    
+    // Create a new powerup
+    const newPowerUp: PowerUp = {
+      id: Date.now(),
+      x: powerUpX,
+      y: powerUpY,
+      type: currentBirdType,
+      collected: false,
+      floatOffset: 0,
+      floatDirection: Math.random() > 0.5 ? 1 : -1, // Random up/down direction
+      floatSpeed: 0.5 + Math.random() * 1.5, // Random float speed
+    };
+    
+    // Add the new powerup to the powerups array
+    setPowerUps(currentPowerUps => [...currentPowerUps, newPowerUp]);
+    powerUpsRef.current = [...powerUpsRef.current, newPowerUp];
+    
+    // Update the last powerup time
+    lastPowerUpTime.current = Date.now();
+  };
+
+  // Check for collision with powerups
+  const checkPowerUpCollision = (powerUp: PowerUp) => {
+    if (powerUp.collected) return false;
+    
+    // Bird dimensions (use same collision box as obstacle collision)
+    const birdSize = 25;
+    const birdLeft = width / 3 + 5;
+    const birdRight = birdLeft + birdSize;
+    const birdTop = (birdPositionRef.current as any)._value + 5;
+    const birdBottom = birdTop + birdSize;
+    
+    // Powerup collision box (slightly smaller than visual size)
+    const powerUpLeft = powerUp.x + 10;
+    const powerUpRight = powerUp.x + POWERUP_SIZE - 10;
+    const powerUpTop = powerUp.y + 10;
+    const powerUpBottom = powerUp.y + POWERUP_SIZE - 10;
+    
+    // Check for collision
+    if (
+      birdRight > powerUpLeft &&
+      birdLeft < powerUpRight &&
+      birdBottom > powerUpTop &&
+      birdTop < powerUpBottom
+    ) {
+      return true;
+    }
+    
+    return false;
+  };
+
   // Update game state
   const updateGame = () => {
     const now = Date.now();
@@ -977,6 +1088,63 @@ const SloppyBirds = () => {
     // Bird's horizontal position (fixed)
     const birdX = width / 3 - BIRD_WIDTH / 2;
     const birdY = newBirdY;
+    
+    // Update powerups
+    const updatedPowerUps = powerUpsRef.current
+      .map(powerUp => {
+        // Skip already collected powerups
+        if (powerUp.collected) return powerUp;
+        
+        // Move powerup to the left
+        const updatedPowerUp = {
+          ...powerUp,
+          x: powerUp.x - PIPE_SPEED * deltaTime,
+          // Add floating motion
+          floatOffset: powerUp.floatOffset + (powerUp.floatDirection * powerUp.floatSpeed * deltaTime),
+          y: powerUp.y + (powerUp.floatDirection * powerUp.floatSpeed * Math.sin(now / 500) * deltaTime),
+        };
+        
+        // Reverse direction if it's gone too far up or down
+        if (Math.abs(updatedPowerUp.floatOffset) > 30) {
+          updatedPowerUp.floatDirection *= -1;
+        }
+        
+        // Check for collision with bird
+        if (checkPowerUpCollision(updatedPowerUp)) {
+          console.log('Powerup collected!');
+          updatedPowerUp.collected = true;
+          
+          // Add 3 points for collecting a powerup
+          setScore(prevScore => {
+            const newScore = prevScore + 3;
+            scoreRef.current = newScore;
+            if (newScore > highScore) {
+              setHighScore(newScore);
+            }
+            return newScore;
+          });
+          
+          // Set bird to powered-up state
+          setIsPoweredUp(true);
+          
+          // Clear any existing powerup timer
+          if (powerUpTimerRef.current) {
+            clearTimeout(powerUpTimerRef.current);
+          }
+          
+          // Set a timer to revert back to normal after 5 seconds
+          powerUpTimerRef.current = setTimeout(() => {
+            setIsPoweredUp(false);
+            powerUpTimerRef.current = null;
+          }, 5000);
+        }
+        
+        return updatedPowerUp;
+      })
+      .filter(powerUp => powerUp.x > -POWERUP_SIZE || powerUp.collected); // Keep collected powerups for animation
+    
+    powerUpsRef.current = updatedPowerUps;
+    setPowerUps(updatedPowerUps);
     
     // Update pipes and check collisions
     const updatedPipes = pipesRef.current
@@ -1051,11 +1219,22 @@ const SloppyBirds = () => {
     birdPositionRef.current.setValue(height / 2 - BIRD_HEIGHT / 2);
     birdVelocityRef.current = 0;
     birdRotation.setValue(0);
+    setIsPoweredUp(false);
+    
+    // Clear any powerup timer
+    if (powerUpTimerRef.current) {
+      clearTimeout(powerUpTimerRef.current);
+      powerUpTimerRef.current = null;
+    }
     
     // Reset pipes
     setPipes([]);
     pipesRef.current = [];
     pipesPassedRef.current = new Set();
+    
+    // Reset powerups
+    setPowerUps([]);
+    powerUpsRef.current = [];
     
     // Clear any running animations/timers
     if (animationFrameId.current) {
@@ -1066,6 +1245,11 @@ const SloppyBirds = () => {
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
+    }
+    
+    if (powerUpTimerId.current) {
+      clearInterval(powerUpTimerId.current);
+      powerUpTimerId.current = null;
     }
     
     // Refresh high score from Supabase to ensure we have the latest
@@ -1106,6 +1290,12 @@ const SloppyBirds = () => {
     if (pipeTimerId.current) {
       clearInterval(pipeTimerId.current);
       pipeTimerId.current = null;
+    }
+    
+    // Stop powerup generator
+    if (powerUpTimerId.current) {
+      clearInterval(powerUpTimerId.current);
+      powerUpTimerId.current = null;
     }
     
     // Save score to Supabase if user exists and score is greater than 0
@@ -1192,6 +1382,42 @@ const SloppyBirds = () => {
     );
   };
   
+  // Render powerups
+  const renderPowerUps = () => {
+    return (
+      <>
+        {powerUps.map(powerUp => {
+          // Skip rendering collected powerups
+          if (powerUp.collected) return null;
+          
+          return (
+            <View
+              key={powerUp.id}
+              style={{
+                position: 'absolute',
+                left: powerUp.x,
+                top: powerUp.y,
+                width: POWERUP_SIZE,
+                height: POWERUP_SIZE,
+                zIndex: 5, // Make sure powerups appear above obstacles
+              }}
+            >
+              <Image
+                source={powerUpImages[powerUp.type]}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  resizeMode: 'contain',
+                }}
+                fadeDuration={0}
+              />
+            </View>
+          );
+        })}
+      </>
+    );
+  };
+
   // Render obstacles
   const renderObstacles = () => {
     return (
@@ -1314,6 +1540,9 @@ const SloppyBirds = () => {
               {/* Render obstacles */}
               {renderObstacles()}
               
+              {/* Render powerups */}
+              {renderPowerUps()}
+              
               {/* Bird */}
               <Animated.View
                 style={[
@@ -1327,7 +1556,7 @@ const SloppyBirds = () => {
                 ]}
               >
                 <Image
-                  source={birds[selectedBirdIndex].image}
+                  source={isPoweredUp ? poweredUpBirdImages[birds[selectedBirdIndex].name] : birds[selectedBirdIndex].image}
                   style={styles.birdImage}
                   resizeMode="contain"
                   fadeDuration={0}
