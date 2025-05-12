@@ -1356,8 +1356,7 @@ export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
         .select('*, users(id, username, first_name, last_name)')
         .eq('game_name', name)
         .in('user_id', userIdsToQuery)
-        .order('score', { ascending: false })
-        .limit(limit);
+        .order('score', { ascending: false });
       
       if (!error && data && data.length > 0) {
         console.log(`Found ${data.length} scores with game name: ${name}`, data);
@@ -1366,9 +1365,28 @@ export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
       }
     }
     
-    // If we found data, return it
+    // If we found data, process it to get unique users with highest scores
     if (leaderboardData.length > 0) {
-      return leaderboardData;
+      // Create a map to track highest score per user
+      const userHighestScores = new Map();
+      
+      // Process each score
+      leaderboardData.forEach(entry => {
+        const userId = entry.user_id;
+        
+        // If we haven't seen this user yet, or if this score is higher than what we've seen
+        if (!userHighestScores.has(userId) || entry.score > userHighestScores.get(userId).score) {
+          userHighestScores.set(userId, entry);
+        }
+      });
+      
+      // Convert map back to array and sort by score
+      const uniqueLeaderboard = Array.from(userHighestScores.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+      
+      console.log('Unique leaderboard with highest scores per user:', uniqueLeaderboard);
+      return uniqueLeaderboard;
     }
     
     // If no data found, try a more general query without game name filter
@@ -1377,8 +1395,7 @@ export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
       .from('game_sessions')
       .select('*, users(id, username, first_name, last_name)')
       .in('user_id', userIdsToQuery)
-      .order('score', { ascending: false })
-      .limit(20);
+      .order('score', { ascending: false });
     
     if (allScoresError) {
       console.error('Error fetching all game scores:', allScoresError);
@@ -1392,7 +1409,27 @@ export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
       
       if (filteredScores.length > 0) {
         console.log('Filtered scores that match our game:', filteredScores);
-        return filteredScores;
+        
+        // Create a map to track highest score per user
+        const userHighestScores = new Map();
+        
+        // Process each score
+        filteredScores.forEach(entry => {
+          const userId = entry.user_id;
+          
+          // If we haven't seen this user yet, or if this score is higher than what we've seen
+          if (!userHighestScores.has(userId) || entry.score > userHighestScores.get(userId).score) {
+            userHighestScores.set(userId, entry);
+          }
+        });
+        
+        // Convert map back to array and sort by score
+        const uniqueLeaderboard = Array.from(userHighestScores.values())
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit);
+        
+        console.log('Unique leaderboard with highest scores per user:', uniqueLeaderboard);
+        return uniqueLeaderboard;
       }
     }
     
@@ -1408,14 +1445,30 @@ export const getFriendsLeaderboard = async (gameName: string, limit = 10) => {
           const scoreName = score.game_name?.toLowerCase() || '';
           return possibleGameNames.some(name => scoreName.includes(name.toLowerCase())) &&
                  userIdsToQuery.includes(score.user_id);
-        })
-        .sort((a: any, b: any) => b.score - a.score)
-        .slice(0, limit);
+        });
 
       console.log('Filtered AsyncStorage scores:', filteredScores);
       
+      // Create a map to track highest score per user
+      const userHighestScores = new Map();
+      
+      // Process each score
+      filteredScores.forEach((entry: any) => {
+        const userId = entry.user_id;
+        
+        // If we haven't seen this user yet, or if this score is higher than what we've seen
+        if (!userHighestScores.has(userId) || entry.score > userHighestScores.get(userId).score) {
+          userHighestScores.set(userId, entry);
+        }
+      });
+      
+      // Convert map back to array and sort by score
+      const uniqueLeaderboard = Array.from(userHighestScores.values())
+        .sort((a: any, b: any) => b.score - a.score)
+        .slice(0, limit);
+      
       // For AsyncStorage fallback, we need to add user info
-      return await Promise.all(filteredScores.map(async (score: any) => {
+      return await Promise.all(uniqueLeaderboard.map(async (score: any) => {
         const friend = friends.find((f: any) => f.friend_id === score.user_id);
         const isCurrentUser = score.user_id === currentUser.id;
         
