@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { useSupabase } from '../src/lib/supabase/SupabaseProvider';
-import { getOrCreateUser, updateProfile } from '../src/lib/supabase/supabaseClient';
+import { useSupabase } from '../../src/lib/supabase/SupabaseProvider';
+import { getOrCreateUser, updateProfile } from '../../src/lib/supabase/supabaseClient';
 import { ArrowLeft } from 'lucide-react-native';
 
 // Custom UUID generator for React Native (RFC4122 version 4 compliant)
