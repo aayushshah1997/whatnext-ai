@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, Image, Animated, ActivityIndicator } from 'react-native';
 import ScreenLayout from '../../components/ScreenLayout';
-import { Gamepad2, Users2, Trophy, Dice1, ChevronLeft } from 'lucide-react-native';
+import { Gamepad2, Users2, Trophy, Dice1, ChevronLeft, Beer } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { Asset } from 'expo-asset';
 
@@ -22,6 +22,12 @@ const games: GameItem[] = [
     description: 'Avoid drinks and collect power-ups in this addictive mini-game',
     customImage: sloppyBirdsLogo, // Using the imported logo image
     route: '/games/sloppy-birds', // Updated route to match the new game name
+  },
+  {
+    name: 'Split the G',
+    description: 'Test your skills at splitting the perfect pint',
+    icon: Beer, // Using Beer icon instead of image
+    route: '/games/split-the-g', // Route to the new game
   },
   {
     name: 'Never Have I Ever',
