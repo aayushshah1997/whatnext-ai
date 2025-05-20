@@ -465,7 +465,7 @@ export default function SplitTheGWebView() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.push('/(tabs)/games')} style={styles.backButton}>
           <ChevronLeft size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Split the G</Text>
@@ -516,12 +516,22 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 5,
   },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  iconButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
   headerTitle: {
+    flex: 1,
     color: '#FFD700',
     fontSize: 18,
     fontWeight: 'bold',
-    marginLeft: 15,
-    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
   },
   testButton: {
     backgroundColor: '#FFD700',

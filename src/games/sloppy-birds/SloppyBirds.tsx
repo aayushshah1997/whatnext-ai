@@ -1359,8 +1359,8 @@ const SloppyBirds = () => {
       pipeTimerId.current = null;
     }
     
-    // Navigate to the games screen directly instead of using router.back()
-    router.push('/games');
+    // Navigate specifically to the tab-based games screen with the carousel
+    router.push('/(tabs)/games');
   };
   
   // Bird rotation interpolation
